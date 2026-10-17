@@ -17,7 +17,6 @@ pub(super) struct ServerRow {
     pub host_json: Option<String>,
     pub agent_version: Option<String>,
     pub token_hash: String,
-    #[serde(default)]
     pub country: Option<String>,
 }
 
@@ -48,7 +47,7 @@ impl Hub {
         }
         let traffic_month = live
             .as_ref()
-            .and_then(|c| c.traffic_month.clone())
+            .map(|c| c.traffic_month.clone())
             .unwrap_or_else(|| self.safe_traffic_month(&row.id));
         let alerts_firing = self.firing_count(&row.id)?;
         Ok(ServerStatus {
@@ -192,6 +191,7 @@ impl Hub {
             "metrics_1m",
             "metrics_1h",
             "dirty_hours",
+            "agent_updates",
         ] {
             sql.exec(
                 &format!("DELETE FROM {table} WHERE server_id = ?"),

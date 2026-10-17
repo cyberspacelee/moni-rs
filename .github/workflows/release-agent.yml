@@ -5,7 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -17,21 +17,57 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "moni-agent"))')
+          test "$RELEASE_TAG" = "v$version" || { echo 'Tag must match workspace.package.version'; exit 1; }
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$'
       - name: Install cargo-zigbuild
         run: python3 -m pip install cargo-zigbuild
       - name: Build static binaries
         run: |
-          cargo zigbuild --locked --release -p moni-agent \
+          cargo zigbuild --locked --profile agent-release -p moni-agent \
             --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
           mkdir -p dist
-          cp target/x86_64-unknown-linux-musl/release/moni-agent dist/moni-agent-linux-amd64
-          cp target/aarch64-unknown-linux-musl/release/moni-agent dist/moni-agent-linux-arm64
+          cp target/x86_64-unknown-linux-musl/agent-release/moni-agent dist/moni-agent-linux-amd64
+          cp target/aarch64-unknown-linux-musl/agent-release/moni-agent dist/moni-agent-linux-arm64
           cp scripts/install-agent.sh dist/
-          (cd dist && sha256sum moni-agent-linux-amd64 moni-agent-linux-arm64 install-agent.sh > SHA256SUMS)
+          cp scripts/update-agent.sh dist/
+          cp scripts/release-public.pem dist/
+          (cd dist && sha256sum moni-agent-linux-amd64 moni-agent-linux-arm64 install-agent.sh update-agent.sh release-public.pem > SHA256SUMS)
+      - name: Sign checksum manifest
+        env:
+          AGENT_RELEASE_SIGNING_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$AGENT_RELEASE_SIGNING_KEY" || { echo 'AGENT_RELEASE_SIGNING_KEY is required'; exit 1; }
+          umask 077
+          key_file=$(mktemp "$RUNNER_TEMP/moni-signing.XXXXXXXX")
+          public_file=$(mktemp "$RUNNER_TEMP/moni-public.XXXXXXXX")
+          trap 'rm -f "$key_file" "$public_file" "$public_file.der" "$public_file.pinned.der"' EXIT
+          printf '%s\n' "$AGENT_RELEASE_SIGNING_KEY" > "$key_file"
+          openssl rsa -in "$key_file" -passin pass: -pubout -out "$public_file" 2>/dev/null
+          key_bits=$(openssl rsa -pubin -in "$public_file" -text -noout 2>/dev/null | sed -n 's/^Public-Key: (\([0-9][0-9]*\) bit)$/\1/p')
+          test -n "$key_bits" && test "$key_bits" -ge 3072
+          openssl pkey -pubin -in "$public_file" -outform DER -out "$public_file.der"
+          openssl pkey -pubin -in scripts/release-public.pem -outform DER -out "$public_file.pinned.der"
+          cmp -s "$public_file.der" "$public_file.pinned.der" || { echo 'Signing key does not match scripts/release-public.pem'; exit 1; }
+          openssl dgst -sha256 -sign "$key_file" -passin pass: -out dist/SHA256SUMS.sig dist/SHA256SUMS
       - uses: actions/upload-artifact@v5
         with:
           name: moni-agent
           path: dist/*
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: moni-agent
+          path: dist
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:

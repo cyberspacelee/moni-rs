@@ -18,7 +18,7 @@ pub(crate) fn var_u32(env: &Env, name: &str, default: u32) -> u32 {
 }
 
 pub(crate) fn report_interval(env: &Env) -> u32 {
-    var_u32(env, "REPORT_INTERVAL_S", 5)
+    var_u32(env, "REPORT_INTERVAL_S", 2)
 }
 
 async fn to_hub(req: Request, env: &Env) -> Result<Response> {
@@ -183,7 +183,9 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         return to_hub(req, &env).await;
     }
     match (req.method(), path.as_str()) {
-        (Method::Post, "/api/auth/logout") => auth::session_response(&req, &secrets.key, true),
+        (Method::Post, "/api/auth/logout") => {
+            auth::session_response(&req, &secrets.session_key, true)
+        }
         (Method::Get, "/api/auth/me") => Response::from_json(&AuthMeResponse {
             authenticated: true,
         }),

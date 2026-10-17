@@ -27,6 +27,8 @@ fn export_typescript() -> Result<(), Box<dyn Error>> {
 
     export!(
         ActiveAlert,
+        AgentUpdateRequest,
+        AgentUpdateStatus,
         AgentMessage,
         AlertEvent,
         AlertKind,
@@ -58,6 +60,8 @@ fn export_typescript() -> Result<(), Box<dyn Error>> {
         TokenResponse,
         Traffic,
         UpdateServerRequest,
+        UpdateState,
+        UpdateError,
     );
     fs::write(output.join("index.ts"), index)?;
 

@@ -50,7 +50,11 @@ jobs:
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
       - run: worker-build --release
         working-directory: crates/worker
+      - run: node scripts/test-adaptive-reporting.mjs
+      - run: node scripts/test-update-api.mjs
       - run: npx --prefix web playwright-core install --with-deps chromium
       - run: scripts/e2e.sh --quick --ui
       - run: sh -n scripts/install-agent.sh
+      - run: sh -n scripts/update-agent.sh
       - run: python3 scripts/test-install-agent.py
+      - run: python3 scripts/test-update-agent.py

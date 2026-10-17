@@ -19,6 +19,7 @@ const SESSION_MS: i64 = 30 * 86_400_000;
 pub(crate) struct Secrets {
     pub password: String,
     pub key: String,
+    pub session_key: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -26,7 +27,15 @@ impl Secrets {
     pub fn load(env: &Env) -> Option<Self> {
         let password = env.secret("ADMIN_PASSWORD").ok()?.to_string();
         let key = env.secret("AUTH_SECRET").ok()?.to_string();
-        (!password.is_empty() && key.len() >= 32).then_some(Self { password, key })
+        if password.is_empty() || key.len() < 32 {
+            return None;
+        }
+        let session_key = session_key(&key, &password).ok()?;
+        Some(Self {
+            password,
+            key,
+            session_key,
+        })
     }
 }
 
@@ -54,6 +63,11 @@ pub fn token_hash(key: &str, token: &str) -> std::result::Result<String, &'stati
         write!(hex, "{byte:02x}").map_err(|_| "Cannot encode token hash")?;
     }
     Ok(hex)
+}
+
+pub fn session_key(key: &str, password: &str) -> std::result::Result<String, &'static str> {
+    // Password rotation revokes sessions without invalidating independently provisioned Agent tokens.
+    token_hash(key, &format!("moni-admin-session-key-v1:{password}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -127,7 +141,7 @@ pub(crate) fn is_admin(req: &Request, secrets: &Secrets) -> bool {
                 .split(';')
                 .filter_map(|c| c.trim().split_once('='))
                 .any(|(name, value)| {
-                    name == "moni_session" && valid_session(value, &secrets.key, now_ms())
+                    name == "moni_session" && valid_session(value, &secrets.session_key, now_ms())
                 })
         })
 }
@@ -160,6 +174,30 @@ pub(crate) fn session_response(req: &Request, key: &str, clear: bool) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn password_rotation_revokes_sessions_without_rotating_agent_tokens()
+    -> std::result::Result<(), &'static str> {
+        let key = "a signing key that is at least 32 bytes";
+        let token = format!("mn_server-2_{}", URL_SAFE_NO_PAD.encode([7u8; 32]));
+        let agent_hash = token_hash(key, &token)?;
+        let old_session_key = session_key(key, "old-password")?;
+        let signature = URL_SAFE_NO_PAD.encode(sign(&old_session_key, "session:2000")?);
+        let cookie = format!("2000.{signature}");
+        assert!(valid_session(&cookie, &old_session_key, 1000));
+
+        let new_session_key = session_key(key, "new-password")?;
+        assert!(!valid_session(&cookie, &new_session_key, 1000));
+        let new_signature = URL_SAFE_NO_PAD.encode(sign(&new_session_key, "session:2000")?);
+        assert!(valid_session(
+            &format!("2000.{new_signature}"),
+            &new_session_key,
+            1000
+        ));
+        assert_eq!(token_hash(key, &token)?, agent_hash);
+        assert_ne!(token_hash(&new_session_key, &token)?, agent_hash);
+        Ok(())
+    }
 
     #[test]
     fn sessions_and_agent_tokens_reject_tampering() -> std::result::Result<(), &'static str> {

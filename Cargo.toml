@@ -5,7 +5,7 @@ members = ["crates/protocol", "crates/agent", "crates/worker"]
 default-members = ["crates/protocol", "crates/agent"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 
@@ -24,3 +24,9 @@ strip = true
 
 [profile.release.package.moni-worker]
 opt-level = "z"
+
+# Keep the agent's size and panic policy separate from the wasm-bindgen Worker build.
+[profile.agent-release]
+inherits = "release"
+opt-level = "z"
+panic = "abort"

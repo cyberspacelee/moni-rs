@@ -80,11 +80,14 @@ fn active_alert(value: Value) -> Value {
 
 #[test]
 fn agent_messages_match_design() {
-    assert_eq!(PROTOCOL_VERSION, 2);
-    let hello = assert_roundtrip::<AgentMessage>(json!({
-        "type": "hello", "protocol": 2, "agent_version": "0.1.0", "host": host()
-    }));
-    assert!(matches!(hello, AgentMessage::Hello { protocol: 2, .. }));
+    assert_eq!(PROTOCOL_VERSION, 3);
+    for repo in [Value::Null, json!("owner/moni-rs")] {
+        let hello = assert_roundtrip::<AgentMessage>(json!({
+            "type": "hello", "protocol": 3, "agent_version": "0.1.0", "host": host(),
+            "update_repo": repo
+        }));
+        assert!(matches!(hello, AgentMessage::Hello { protocol: 3, .. }));
+    }
 
     let mut frame = metrics();
     frame["type"] = json!("metrics");
@@ -103,6 +106,22 @@ fn agent_messages_match_design() {
 
 #[test]
 fn hub_messages_match_design() {
+    assert_roundtrip::<HubMessage>(json!({
+        "type": "update", "job_id": "0123456789abcdef0123456789abcdef",
+        "version": "v0.1.1", "repo": "owner/moni-rs"
+    }));
+    assert_roundtrip::<AgentMessage>(json!({
+        "type": "update_status", "job_id": "0123456789abcdef0123456789abcdef",
+        "version": "v0.1.1", "state": "accepted", "error": null
+    }));
+    assert!(matches!(
+        assert_roundtrip::<HubMessage>(json!({
+            "type": "set_report_interval", "report_interval_s": 15
+        })),
+        HubMessage::SetReportInterval {
+            report_interval_s: 15
+        }
+    ));
     assert!(matches!(
         assert_roundtrip::<HubMessage>(json!({
             "type": "welcome", "server_id": "vps-1", "report_interval_s": 5

@@ -669,11 +669,12 @@ dependencies = [
 
 [[package]]
 name = "moni-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
  "futures-util",
+ "libc",
  "moni-protocol",
  "rustls",
  "serde_json",
@@ -686,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "moni-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -695,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "moni-worker"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "console_error_panic_hook",

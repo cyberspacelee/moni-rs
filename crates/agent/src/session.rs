@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use futures_util::{SinkExt, StreamExt};
-use moni_protocol::{AgentMessage, HostInfo, HubMessage, PROTOCOL_VERSION};
+use moni_protocol::{AgentMessage, HostInfo, HubMessage, PROTOCOL_VERSION, UpdateError};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::watch,
@@ -15,9 +15,9 @@ use tokio_tungstenite::{
         http::{HeaderValue, StatusCode},
     },
 };
-use tracing::info;
+use tracing::{info, warn};
 
-use crate::{State, config::Config};
+use crate::{State, config::Config, update};
 
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -146,12 +146,33 @@ async fn communicate<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    communicate_at(
+        socket,
+        config,
+        host,
+        state,
+        Path::new(update::REQUEST_DIRECTORY),
+    )
+    .await
+}
+
+async fn communicate_at<S>(
+    socket: &mut WebSocketStream<S>,
+    config: &Config,
+    host: &HostInfo,
+    state: &State,
+    update_directory: &Path,
+) -> Result<(), End>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     send_agent(
         socket,
         &AgentMessage::Hello {
             protocol: PROTOCOL_VERSION,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             host: host.clone(),
+            update_repo: update::advertised_repo(config),
         },
     )
     .await?;
@@ -173,6 +194,14 @@ where
         configured_interval_s = config.interval,
         "connected; Hello/Welcome complete"
     );
+    if config.update_repo.is_some() {
+        let directory = update_directory.to_owned();
+        tokio::task::spawn_blocking(move || {
+            if update::write_health(&directory).is_err() {
+                warn!("could not write update health marker");
+            }
+        });
+    }
     *state.window.borrow_mut() = Default::default();
     state.queue.borrow_mut().resend_all();
     let count = send_pending(socket, state).await?;
@@ -185,12 +214,41 @@ where
     let mut ping = interval_at(now + ping_period, ping_period);
     report.set_missed_tick_behavior(MissedTickBehavior::Skip);
     ping.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut awaiting_fresh_sample = false;
+    struct PendingUpdate {
+        job_id: String,
+        version: String,
+        task: tokio::task::JoinHandle<Result<(), UpdateError>>,
+    }
+    let mut pending_update: Option<PendingUpdate> = None;
     loop {
         tokio::select! {
+            result = async {
+                match pending_update.as_mut() {
+                    Some(pending) => (&mut pending.task).await.unwrap_or(Err(UpdateError::RequestFailed)),
+                    None => std::future::pending().await,
+                }
+            }, if pending_update.is_some() => {
+                if let Some(pending) = pending_update.take() {
+                    send_agent(socket, &update::status(pending.job_id, pending.version, result.err())).await?;
+                }
+            }
             _ = report.tick() => {
                 let frame = state.frame();
                 if let Some(frame) = frame {
                     send_agent(socket, &AgentMessage::Metrics(frame)).await?;
+                    if awaiting_fresh_sample {
+                        report.reset();
+                        awaiting_fresh_sample = false;
+                    }
+                }
+            }
+            _ = state.sample_ready.notified(), if awaiting_fresh_sample => {
+                let frame = state.frame();
+                if let Some(frame) = frame {
+                    send_agent(socket, &AgentMessage::Metrics(frame)).await?;
+                    report.reset();
+                    awaiting_fresh_sample = false;
                 }
             }
             _ = state.ready.notified() => { send_pending(socket, state).await?; }
@@ -200,6 +258,40 @@ where
             }
             message = receive(socket) => match message? {
                 HubMessage::Ack { minute_ms } => state.queue.borrow_mut().ack(minute_ms),
+                HubMessage::Update { job_id, version, repo } => {
+                    let error = update::validate(config, &job_id, &version, &repo).err();
+                    if let Some(error) = error {
+                        send_agent(socket, &update::status(job_id, version, Some(error))).await?;
+                    } else if let Some(pending) = pending_update.as_ref() {
+                        if pending.job_id != job_id || pending.version != version {
+                            send_agent(socket, &update::status(job_id, version, Some(UpdateError::Busy))).await?;
+                        }
+                    } else {
+                        let directory = update_directory.to_owned();
+                        let requested_job = job_id.clone();
+                        let requested_version = version.clone();
+                        pending_update = Some(PendingUpdate {
+                            job_id,
+                            version,
+                            task: tokio::task::spawn_blocking(move || update::write_request(&directory, &requested_job, &requested_version)),
+                        });
+                    }
+                }
+                HubMessage::SetReportInterval { report_interval_s } => {
+                    if report_interval_s == 0 {
+                        return Err(End::Retry("expected a positive report interval"));
+                    }
+                    let period = Duration::from_secs(u64::from(report_interval_s));
+                    if period != report.period() {
+                        awaiting_fresh_sample = period < report.period();
+                        if awaiting_fresh_sample {
+                            *state.window.borrow_mut() = Default::default();
+                        }
+                        report = interval_at(Instant::now() + period, period);
+                        report.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                        info!(report_interval_s, "report interval changed");
+                    }
+                }
                 HubMessage::Welcome { .. } => return Err(End::Retry("unexpected duplicate Welcome")),
             },
         }

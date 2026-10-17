@@ -4,6 +4,7 @@ mod alerts;
 mod data;
 mod schema;
 mod servers;
+mod updates;
 
 use std::{
     cell::{Cell, RefCell},
@@ -31,7 +32,7 @@ const ALARM_PERIOD_MS: i64 = 30_000;
 #[allow(clippy::large_enum_variant)]
 enum Attachment {
     Agent(AgentConn),
-    Dash,
+    Dash { closing: bool },
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -40,14 +41,17 @@ struct AgentConn {
     last_seen_ms: i64,
     closing: bool,
     latest: Option<MetricsFrame>,
-    #[serde(default)]
     parse_warn_ms: Option<i64>,
-    #[serde(default)]
     pending: HashMap<String, i64>,
-    #[serde(default)]
     pending_warn_ms: Option<i64>,
-    #[serde(default)]
-    traffic_month: Option<CachedTraffic>,
+    traffic_month: CachedTraffic,
+    report_interval_s: u32,
+    report_grace_until_ms: Option<i64>,
+    hello_received: bool,
+    update_repo: Option<String>,
+    update_sent_job_id: Option<String>,
+    update_sent_ms: Option<i64>,
+    update_attempts: u8,
 }
 
 // Attachments use JS numbers; serializing a u64 above 2^53 through workers-rs fails.
@@ -94,7 +98,7 @@ pub struct Hub {
 
 impl DurableObject for Hub {
     fn new(state: State, env: Env) -> Self {
-        if schema::migrate(&state.storage().sql()).is_err() {
+        if schema::migrate(&state.storage()).is_err() {
             console_error!("Hub schema migration failed");
         }
         let hub = Self {
@@ -130,6 +134,11 @@ impl DurableObject for Hub {
         let WebSocketIncomingMessage::String(text) = message else {
             return Ok(());
         };
+        if text.len() > 16_384 {
+            self.on_disconnect(&ws)?;
+            ws.close(Some(1009), Some("message too large"))?;
+            return Ok(());
+        }
         let message = match serde_json::from_str::<AgentMessage>(&text) {
             Ok(message) => message,
             Err(error) => {
@@ -147,6 +156,7 @@ impl DurableObject for Hub {
             }
         };
         conn.last_seen_ms = now_ms();
+        conn.report_grace_until_ms = None;
         self.heal_alarm(conn.last_seen_ms).await;
         self.refresh_traffic(&ws, &mut conn)?;
         match message {
@@ -154,14 +164,25 @@ impl DurableObject for Hub {
                 protocol,
                 agent_version,
                 host,
+                update_repo,
             } => {
+                if conn.hello_received {
+                    self.on_disconnect(&ws)?;
+                    ws.close(Some(1008), Some("duplicate Hello"))?;
+                    return Ok(());
+                }
                 if protocol != PROTOCOL_VERSION {
                     self.on_disconnect(&ws)?;
                     ws.close(Some(CLOSE_INCOMPATIBLE), Some("incompatible protocol"))?;
                     return Ok(());
                 }
                 // Bound untrusted metadata before storage; no host data is kept in attachments.
-                if serde_json::to_string(&host)?.len() > 8192 || agent_version.len() > 128 {
+                if serde_json::to_string(&host)?.len() > 8192
+                    || agent_version.len() > 128
+                    || update_repo
+                        .as_deref()
+                        .is_some_and(|repo| !moni_protocol::release::valid_repo(repo))
+                {
                     self.on_disconnect(&ws)?;
                     ws.close(Some(1009), Some("host metadata too large"))?;
                     return Ok(());
@@ -174,6 +195,15 @@ impl DurableObject for Hub {
                         conn.server_id.as_str().into(),
                     ],
                 )?;
+                conn.hello_received = true;
+                conn.update_repo = update_repo;
+                conn.report_interval_s = self.desired_report_interval();
+                ws.send(&HubMessage::Welcome {
+                    server_id: conn.server_id.clone(),
+                    report_interval_s: conn.report_interval_s,
+                })?;
+                self.confirm_update(&conn.server_id, &agent_version)?;
+                self.deliver_update(&ws, &mut conn)?;
                 save(&ws, conn.clone())?;
                 self.broadcast(&DashboardEvent::Online {
                     id: conn.server_id.clone(),
@@ -210,15 +240,24 @@ impl DurableObject for Hub {
                         return Err(error);
                     }
                 };
-                if stored && let Some(traffic) = conn.traffic_month {
+                if stored {
                     self.broadcast(&DashboardEvent::Traffic {
                         id: conn.server_id,
-                        traffic: traffic.into(),
+                        traffic: conn.traffic_month.into(),
                     });
                 }
                 ws.send(&HubMessage::Ack {
                     minute_ms: rollup.minute_ms,
                 })?;
+            }
+            AgentMessage::UpdateStatus {
+                job_id,
+                version,
+                state,
+                error,
+            } => {
+                self.receive_update_status(&conn, &job_id, &version, state, error)?;
+                save(&ws, conn)?;
             }
         }
         self.dispatch_notifications()?;
@@ -252,12 +291,13 @@ impl DurableObject for Hub {
             }
         };
         let now = now_ms();
-        let interval_ms = i64::from(report_interval(&self.env)) * 1000;
         for ws in self.state.get_websockets_with_tag(TAG_AGENT) {
             let Some(conn) = agent_conn(&ws).filter(|c| !c.closing) else {
                 continue;
             };
-            if now - conn.last_seen_ms > 3 * interval_ms {
+            let deadline = logic::agent_deadline(conn.last_seen_ms, conn.report_interval_s)
+                .max(conn.report_grace_until_ms.unwrap_or(0));
+            if now > deadline {
                 if let Err(error) = self.on_disconnect(&ws) {
                     console_error!("Hub stale disconnect failed: {}", error);
                 }
@@ -272,6 +312,9 @@ impl DurableObject for Hub {
         }
         if let Err(error) = self.maintain(now) {
             console_error!("Hub maintenance failed: {}", error);
+        }
+        if let Err(error) = self.maintain_updates(now) {
+            console_error!("Hub update maintenance failed: {}", error);
         }
         if (!scheduled || had_agents != self.has_agents())
             && let Err(error) = self.schedule_alarm().await
@@ -299,6 +342,8 @@ impl Hub {
             (Method::Get, "/api/alerts/events") => self.alert_events(&req),
             (Method::Post, "/api/alerts/test") => self.test_notifications().await,
             (Method::Get, "/api/servers") => Response::from_json(&self.snapshot()?),
+            (Method::Get, "/api/agent-updates") => Response::from_json(&self.agent_updates()?),
+            (Method::Post, "/api/agent-updates") => self.request_updates(req).await,
             (Method::Post, "/api/servers") => self.create_server(req).await,
             _ => {
                 if let Some(id) = path.strip_prefix("/api/alerts/rules/") {
@@ -355,7 +400,7 @@ impl Hub {
         if !valid {
             return error::unauthorized();
         }
-        auth::session_response(&req, &secrets.key, false)
+        auth::session_response(&req, &secrets.session_key, false)
     }
 
     async fn schedule_alarm(&self) -> Result<()> {
@@ -425,13 +470,16 @@ impl Hub {
                 parse_warn_ms: None,
                 pending: HashMap::new(),
                 pending_warn_ms: None,
-                traffic_month: Some(self.safe_traffic_month(&id)),
+                traffic_month: self.safe_traffic_month(&id),
+                report_interval_s: report_interval(&self.env),
+                report_grace_until_ms: None,
+                hello_received: false,
+                update_repo: None,
+                update_sent_job_id: None,
+                update_sent_ms: None,
+                update_attempts: 0,
             },
         )?;
-        pair.server.send(&HubMessage::Welcome {
-            server_id: id.clone(),
-            report_interval_s: report_interval(&self.env),
-        })?;
         // Geolocation rides along with the connect write, so it costs no extra row write.
         let country = logic::country_code(req.headers().get(H_COUNTRY)?.as_deref());
         self.state.storage().sql().exec(
@@ -455,13 +503,8 @@ impl Hub {
     }
 
     fn accept_dash(&self, admin: bool) -> Result<Response> {
-        let pair = WebSocketPair::new()?;
-        // The tag, not instance state, records the audience so it survives hibernation.
-        let tag = if admin { TAG_DASH } else { TAG_PUBLIC };
-        self.state.accept_websocket_with_tags(&pair.server, &[tag]);
-        pair.server.serialize_attachment(Attachment::Dash)?;
         let servers = self.snapshot()?;
-        pair.server.send(&if admin {
+        let snapshot = if admin {
             DashboardEvent::Snapshot {
                 servers,
                 alerts: self.active_alerts()?,
@@ -471,11 +514,36 @@ impl Hub {
                 servers: servers.into_iter().map(logic::redact_server).collect(),
                 alerts: Vec::new(),
             }
-        })?;
+        };
+        let pair = WebSocketPair::new()?;
+        // The tag, not instance state, records the audience so it survives hibernation.
+        let tag = if admin { TAG_DASH } else { TAG_PUBLIC };
+        self.state.accept_websocket_with_tags(&pair.server, &[tag]);
+        if let Err(error) = (|| {
+            pair.server
+                .serialize_attachment(Attachment::Dash { closing: false })?;
+            pair.server.send(&snapshot)
+        })() {
+            let _ = pair
+                .server
+                .serialize_attachment(Attachment::Dash { closing: true });
+            let _ = pair.server.close(Some(1011), Some("snapshot failed"));
+            return Err(error);
+        }
+        self.sync_report_intervals();
         Response::from_websocket(pair.client)
     }
 
     fn on_disconnect(&self, ws: &WebSocket) -> Result<()> {
+        if matches!(
+            ws.deserialize_attachment()?,
+            Some(Attachment::Dash { closing: false })
+        ) {
+            // Close callbacks can still see their socket in get_websockets_with_tag.
+            ws.serialize_attachment(Attachment::Dash { closing: true })?;
+            self.sync_report_intervals();
+            return Ok(());
+        }
         let Some(mut conn) = agent_conn(ws).filter(|c| !c.closing) else {
             return Ok(());
         };
@@ -497,6 +565,72 @@ impl Hub {
         )?;
         self.broadcast(&DashboardEvent::Offline { id, last_seen_ms });
         Ok(())
+    }
+
+    fn idle_report_interval(&self) -> u32 {
+        crate::var_u32(&self.env, "REPORT_IDLE_INTERVAL_S", 30).max(report_interval(&self.env))
+    }
+
+    fn desired_report_interval(&self) -> u32 {
+        let has_viewers = [TAG_DASH, TAG_PUBLIC].into_iter().any(|tag| {
+            self.state.get_websockets_with_tag(tag).iter().any(|ws| {
+                matches!(
+                    ws.deserialize_attachment().ok().flatten(),
+                    Some(Attachment::Dash { closing: false })
+                )
+            })
+        });
+        if has_viewers {
+            report_interval(&self.env)
+        } else {
+            self.idle_report_interval()
+        }
+    }
+
+    fn update_report_interval(
+        &self,
+        ws: &WebSocket,
+        conn: &mut AgentConn,
+        interval: u32,
+    ) -> Result<()> {
+        let previous = conn.report_interval_s;
+        if !conn.hello_received || previous == interval {
+            return Ok(());
+        }
+        ws.send(&HubMessage::SetReportInterval {
+            report_interval_s: interval,
+        })?;
+        // A faster period must allow a fresh sample; viewer churn must not keep a dead agent alive.
+        let grace = logic::agent_deadline(conn.last_seen_ms, previous)
+            .max(logic::agent_deadline(now_ms(), interval))
+            .max(conn.report_grace_until_ms.unwrap_or(0))
+            .min(logic::agent_deadline(
+                conn.last_seen_ms,
+                self.idle_report_interval(),
+            ));
+        conn.report_interval_s = interval;
+        conn.report_grace_until_ms = Some(grace);
+        Ok(())
+    }
+
+    fn sync_report_intervals(&self) {
+        let interval = self.desired_report_interval();
+        for ws in self.state.get_websockets_with_tag(TAG_AGENT) {
+            let Some(mut conn) = agent_conn(&ws).filter(|c| !c.closing) else {
+                continue;
+            };
+            if !conn.hello_received || conn.report_interval_s == interval {
+                continue;
+            }
+            if let Err(error) = self
+                .update_report_interval(&ws, &mut conn, interval)
+                .and_then(|()| save(&ws, conn))
+            {
+                console_error!("Hub report interval update failed: {}", error);
+                let _ = self.on_disconnect(&ws);
+                let _ = ws.close(Some(1011), Some("report interval update failed"));
+            }
+        }
     }
 
     fn broadcast(&self, event: &DashboardEvent) {

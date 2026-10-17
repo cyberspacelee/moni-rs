@@ -27,7 +27,7 @@
 ```ts
 type AppConfig = {
   version: string;                 // worker 版本（CARGO_PKG_VERSION）
-  report_interval_s: number;
+  report_interval_s: number;       // 有人查看时的实时上报周期，默认 2 秒；不是当前连接的动态周期
   agent_release_repo: string | null;   // 例如 "owner/moni-rs"，用于生成安装命令
   retention: { minute_days: number; hour_days: number };
   notifications: { telegram: boolean; webhook: boolean };
@@ -156,3 +156,59 @@ type DashboardEvent =
 
 `GET /ws/agent`，Header 为 `Authorization: Bearer mn_<server_id>_<secret>`。消息格式见 `docs/design.md` §2.1。
 关闭码：`4000` 连接失活，`4001` 协议不兼容，`4002` 被新连接替换，`4003` token 被轮换或服务器被删除。
+
+### 6.1 动态上报周期
+
+Agent 与 Hub 使用协议 v3，不保留旧协议或能力协商。Hub 校验 Hello 并成功写入元数据后发送 Welcome，`Welcome.report_interval_s` 直接使用当前目标周期：有人查看时为 `REPORT_INTERVAL_S`（默认 2 秒），无人查看时为 `REPORT_IDLE_INTERVAL_S`（默认 30 秒）。
+
+后续周期变化时 Hub 发送以下命令：
+
+```json
+{"type":"set_report_interval","report_interval_s":30}
+```
+
+Hello 完成后，以及看板连接数量变化时，Hub 根据当前 Dashboard WebSocket 选择周期：至少一个管理员或公开只读连接存在时使用 `REPORT_INTERVAL_S`（默认 2 秒）；最后一个连接关闭后使用 `REPORT_IDLE_INTERVAL_S`（默认 30 秒，可配置更长，但有效值至少为查看时周期）。多个窗口共同计数；隐藏标签页只要仍保持 WebSocket，也算有人查看。本次不增加浏览器可见性协议。
+
+Agent 切换到更快周期时丢弃旧的实时聚合窗口，在下一个新样本到来后尽快发送，避免先展示整个空闲周期的平均值。1 秒采样、60 秒 `MinuteRollup`、ACK 和离线待确认队列不受周期切换影响。失活判定使用各连接实际周期，并保留切换宽限；即使空闲周期超过 60 秒，每分钟 Rollup 仍用于维持活性。`PROTOCOL_VERSION = 3`，不同版本以关闭码 `4001` 拒绝连接。
+
+### 6.2 签名升级
+
+只有本机已安装更新 helper、固定可信仓库及公钥，并使用 `wss://` 连接的 Agent，才在 Hello 中发送 `update_repo: "owner/repo"`。缺失或 `null` 表示未启用升级。Hub 不向本机未启用升级的 Agent 投递升级命令。每连接仅接受一次 Hello；消息最大 16 KiB。
+
+```ts
+// Hub → Agent
+type Update = { type: "update"; job_id: string; version: string; repo: string };
+// Agent → Hub；只接受 accepted / failed，不能自行声称 succeeded
+type UpdateStatus = {
+  type: "update_status"; job_id: string; version: string;
+  state: "accepted" | "failed"; error: UpdateError | null;
+};
+```
+
+命令不能携带 URL、路径或 shell 参数；仓库必须与本机固定值一致。`accepted` 仅表示版本请求已经原子写入本地固定请求文件，由独立 root helper 执行验签、安装及回退。Hub 仅在后续新连接的 Hello 报告目标版本时确认成功；若随后连接报告更低版本，则把该任务改为 `failed/request_failed`，反映启动后回退。具体安装与签名设置见 [agent-updates.md](agent-updates.md)。
+
+## 7. 管理端统一升级
+
+以下接口只允许管理员 Cookie / Bearer，沿用 §1 的 Origin、JSON 检查，不对公开页面或 Agent token 开放。本次提供后端接口和生成的 TS 类型，页面可轮询状态；Dashboard 事件不变。
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| POST | `/api/agent-updates` | `{"version":"v0.1.1","server_ids":["vps-1"]}` | `202 AgentUpdateStatus[]`；省略 `server_ids` 表示全部服务器 |
+| GET | `/api/agent-updates` | — | `200 AgentUpdateStatus[]`，每台只保留最近一次任务，按请求时间倒序 |
+
+只接受稳定版 `vX.Y.Z`，各段无前导零、最多 9 位数字；不支持预发布、`latest`、降级或任意下载源。仓库固定为 Worker 变量 `AGENT_RELEASE_REPO`，缺失或非法返回 `503 not_configured`。显式 `server_ids` 必须包含 1–100 个不重复且存在的 ID，省略时全量也最多 100 台；先验证全部目标，非法请求不会创建部分任务。请求体最多 16 KiB，超出返回 `413`；未知字段和重复 JSON 字段被拒绝。
+
+```ts
+type UpdateState = "queued" | "accepted" | "succeeded" | "failed" | "unsupported";
+type UpdateError = "disabled" | "repo_mismatch" | "insecure_transport" | "invalid_version"
+  | "downgrade" | "busy" | "request_failed" | "timeout" | "unsupported";
+type AgentUpdateStatus = {
+  server_id: string; job_id: string; repo: string; version: string;
+  state: UpdateState; error: UpdateError | null;
+  requested_ms: number; updated_ms: number;
+};
+```
+
+同一目标版本的进行中请求复用 `job_id`，另一目标版本返回 `409 conflict`；终态可显式重试。离线任务保留为 `queued`，重连确认本机配置后投递；24 小时未接受则失败。在线投递每连接最多 3 次、间隔至少 60 秒，计数在 attachment 中保存。接受后 10 分钟未通过新 Hello 确认则 `failed/timeout`。本机未启用升级时返回 `unsupported`；仓库不匹配、降级按服务器返回失败状态。服务端忽略伪造成功、跨服务器、错误任务 ID 或版本的状态消息。删除服务器同时删除其任务。
+
+管理员密码变更会撤销已有 Cookie；Agent token 的 HMAC 仍只使用 `AUTH_SECRET`，不受密码变更影响。

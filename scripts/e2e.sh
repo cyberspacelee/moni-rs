@@ -169,6 +169,13 @@ function socket(url, headers) {
   const closed = new Promise(resolve => ws.addEventListener('close', event => resolve(event.code)));
   return { ws, events, closed };
 }
+async function hello(client, protocol = 3) {
+  if (client.ws.readyState === WS.CONNECTING) await once(client.ws, 'open');
+  client.ws.send(JSON.stringify({ type: 'hello', protocol, agent_version: '0.1.0', host: {
+    hostname: 'fixture', os: 'Linux', kernel: 'test', arch: 'x86_64',
+    cpu_model: 'test', cpu_cores: 1, boot_time_ms: 0,
+  }}));
+}
 async function event(client, type, matches = () => true, waitMs = 30_000) {
   for (let i = 0; i < waitMs / 50; i++) {
     const found = client.events.find(e => e.type === type && matches(e));
@@ -304,6 +311,7 @@ try {
   assert.equal(collision.server.id, 'e2e-vps-2');
   // Deterministic history fixtures exercise aggregation/percentages independently of the host load.
   let fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+  await hello(fixture);
   await event(fixture, 'welcome');
   const ruleInput = { name: 'CPU E2E', server_id: collision.server.id, metric: 'cpu', op: 'gt',
     threshold: 0, recover_threshold: null, duration_s: 0, enabled: true };
@@ -375,9 +383,10 @@ try {
   await api('/api/alerts/events?before_id=bad', 400, { headers: admin });
   fixture.ws.close();
   const { regressions } = await import(path.join(repo, 'scripts/e2e-regressions.mjs'));
-  await regressions({ api, admin, socket, event, poll, base,
+  await regressions({ api, admin, socket, hello, event, poll, base,
     patches: JSON.parse(fs.readFileSync(path.join(temp, 'patch.json'), 'utf8')), cpuFrame });
   fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+  await hello(fixture);
   await event(fixture, 'welcome');
   console.log('Alerts passed: defaults, validation, nullable PATCH, firing/recovery, snapshot/counts, disable/delete and event pagination');
   const fixtureHour = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3 * 3_600_000;
@@ -479,6 +488,7 @@ try {
       assert.ok(freshTraffic.tx_bytes >= status.traffic_month.tx_bytes);
     }
     const late = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+    await hello(late);
     await event(late, 'welcome');
     late.ws.send(JSON.stringify(rollup(fixtureHour + 120_000, 30, 400, 15)));
     await event(late, 'ack');
@@ -570,15 +580,14 @@ print('hourly aggregation, dirty hours and per-server retention passed')
   await event(dash, 'offline', e => e.id === server.id);
   await rejectedUpgrade(token);
   const renewed = socket('/ws/agent', { Authorization: `Bearer ${rotated.token}` });
+  await hello(renewed);
   await event(renewed, 'welcome');
   const replacement = socket('/ws/agent', { Authorization: `Bearer ${rotated.token}` });
-  await event(replacement, 'welcome');
+  await hello(replacement, 0);
   assert.equal(await renewed.closed, 4002);
-  replacement.ws.send(JSON.stringify({ type: 'hello', protocol: 0, agent_version: 'old', host: {
-    hostname: 'old', os: 'linux', kernel: 'test', arch: 'x86_64', cpu_model: 'test', cpu_cores: 1, boot_time_ms: 0,
-  }}));
   assert.equal(await replacement.closed, 4001);
   const finalAgent = socket('/ws/agent', { Authorization: `Bearer ${rotated.token}` });
+  await hello(finalAgent);
   await event(finalAgent, 'welcome');
   finalAgent.ws.send(JSON.stringify({ type: 'rollup', minute_ms: 60_000, samples: 1, cpu_avg: 0, cpu_max: 0,
     mem_used_avg: 0, mem_total: 0, swap_used_avg: 0, swap_total: 0, disk_used: 0, disk_total: 0,
@@ -618,27 +627,12 @@ print('hourly aggregation, dirty hours and per-server retention passed')
   });
   await new Promise(resolve => webhook.listen(0, '127.0.0.1', resolve));
   await stopWorker();
-  editStorage(`
-import pathlib, sqlite3, sys, time
-for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
-    db = sqlite3.connect(file)
-    if not db.execute("SELECT name FROM sqlite_master WHERE name='alert_events'").fetchone():
-        db.close(); continue
-    db.execute('DROP TABLE notification_queue')
-    for column in ('rule_name', 'server_name'):
-        db.execute(f"ALTER TABLE alert_events DROP COLUMN {column}")
-    db.execute("UPDATE meta SET v='1' WHERE k='schema_version'")
-    db.execute("INSERT INTO alert_events (rule_id,server_id,kind,value,ts_ms) VALUES ('legacy-rule','legacy-server','firing',1,?)", (int(time.time() * 1000),))
-    db.commit(); db.close()
-`);
   const configured = JSON.parse(fs.readFileSync(path.join(temp, 'config.json'), 'utf8'));
   configured.vars.WEBHOOK_URL = `http://127.0.0.1:${webhook.address().port}/notify`;
   fs.writeFileSync(path.join(temp, 'config.json'), JSON.stringify(configured));
   await startWorker();
   assert.ok(!(await (await api(ruleUrl, 200, { headers: admin })).json()).some(r => r.id === removedDefault));
-  const migratedEvents = await (await api('/api/alerts/events?limit=1', 200, { headers: admin })).json();
-  assert.equal(migratedEvents[0].rule_name, 'legacy-rule');
-  assert.equal(migratedEvents[0].server_name, 'legacy-server');
+  const eventsBeforeNotificationTest = await (await api('/api/alerts/events', 200, { headers: admin })).json();
   assert.deepEqual(await (await api('/api/alerts/test', 200, { method: 'POST', headers: admin })).json(),
     { telegram: 'disabled', webhook: 'ok' });
   assert.deepEqual(Object.keys(notices[0]).sort(), ['event', 'rule', 'server', 'ts_ms', 'value']);
@@ -650,6 +644,7 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
   assert.ok(Date.now() - timeoutStarted >= 4800 && Date.now() - timeoutStarted < 15_000);
   const notifyServer = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { id: 'notify', name: '通知服务器' } })).json();
   const notifyAgent = socket('/ws/agent', { Authorization: `Bearer ${notifyServer.token}` });
+  await hello(notifyAgent);
   await event(notifyAgent, 'welcome');
   const notifyDash = socket('/ws/dashboard', { Cookie });
   await event(notifyDash, 'snapshot');
@@ -677,7 +672,7 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
   await api('/api/servers/notify', 204, { method: 'DELETE', headers: admin });
   await api('/api/alerts/events', 200, { headers: admin });
   assert.equal(notices.filter(n => n.event === 'resolved' && n.server.id === 'notify').length, 0);
-  assert.deepEqual(await (await api('/api/alerts/events', 200, { headers: admin })).json(), migratedEvents);
+  assert.deepEqual(await (await api('/api/alerts/events', 200, { headers: admin })).json(), eventsBeforeNotificationTest);
   assert.equal(new Set(notices.filter(n => n.event === 'firing').map(n => n.rule.id)).size, 26);
   console.log('Notifications passed: disabled/test, Webhook JSON, HTTP failure, 5s timeout, nonblocking handling and 26-transition batches');
   console.log(`e2e passed: auth, config, CRUD, token rejection/revocation, dashboard, alerts, history/rollup (${quick ? "quick; long scenarios skipped" : "full; restart and SIGSTOP"}); ${((Date.now() - e2eStartedMs) / 1000).toFixed(1)}s`);

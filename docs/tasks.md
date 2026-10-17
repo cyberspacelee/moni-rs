@@ -22,7 +22,7 @@
 | R2 | Claude | 目标对照验收（含 R08/R10/R11/R06 前端修复） | R1 | ✅ |
 
 ## B1 协议与 DTO（`crates/protocol`）
-- 按 `docs/design.md` §2 和 `docs/api.md` 实现全部类型，`PROTOCOL_VERSION = 2`。
+- 按 `docs/design.md` §2 和 `docs/api.md` 实现全部类型，`PROTOCOL_VERSION = 3`。
 - 增加 `ts` feature（依赖 `ts-rs`）。`cargo test -p moni-protocol --features ts` 时把 TS 类型导出到 `web/src/api/generated/`，每个类型一个文件，外加 `index.ts` 统一 re-export。
 - 补充单元测试：每种消息都做序列化往返测试；对照 api.md 的示例，校验 tag 和字段名。
 - **完成标准**：`cargo test -p moni-protocol`、`cargo test -p moni-protocol --features ts` 通过，生成的 TS 与 api.md 一致。

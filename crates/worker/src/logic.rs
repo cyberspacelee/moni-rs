@@ -6,6 +6,11 @@ pub const MINUTE_MS: i64 = 60_000;
 pub const HOUR_MS: i64 = 60 * MINUTE_MS;
 pub const DAY_MS: i64 = 24 * HOUR_MS;
 
+pub fn agent_deadline(last_seen_ms: i64, report_interval_s: u32) -> i64 {
+    // Minute rollups remain a heartbeat even when realtime reporting is slower.
+    last_seen_ms.saturating_add(i64::from(report_interval_s.clamp(1, 60)) * 3_000)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct HistoryPlan {
     pub range: HistoryRange,
@@ -263,6 +268,14 @@ mod tests {
             assert!(history_plan(Some(range)).is_none());
         }
         Ok(())
+    }
+
+    #[test]
+    fn agent_deadlines_follow_reports_but_keep_minute_rollups_as_a_heartbeat() {
+        assert_eq!(agent_deadline(1_000, 2), 7_000);
+        assert_eq!(agent_deadline(1_000, 15), 46_000);
+        assert_eq!(agent_deadline(1_000, 300), 181_000);
+        assert_eq!(agent_deadline(i64::MAX, u32::MAX), i64::MAX);
     }
 
     #[test]

@@ -337,6 +337,61 @@ pub struct UpdateServerRequest {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateState {
+    Queued,
+    Accepted,
+    Succeeded,
+    Failed,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateError {
+    Disabled,
+    RepoMismatch,
+    InsecureTransport,
+    InvalidVersion,
+    Downgrade,
+    Busy,
+    RequestFailed,
+    Timeout,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+#[serde(deny_unknown_fields)]
+pub struct AgentUpdateRequest {
+    pub version: String,
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub server_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+pub struct AgentUpdateStatus {
+    pub server_id: String,
+    pub job_id: String,
+    pub repo: String,
+    pub version: String,
+    pub state: UpdateState,
+    pub error: Option<UpdateError>,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub requested_ms: i64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub updated_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]

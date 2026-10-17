@@ -23,6 +23,15 @@ pub struct Config {
     /// Maximum number of unacknowledged minutes kept in memory
     #[arg(long, env = "MONI_QUEUE_CAPACITY", default_value = "1440")]
     pub queue_capacity: NonZeroUsize,
+    /// Trusted release repository, enabled only when the root update helper is installed
+    #[arg(long, env = "MONI_UPDATE_REPO", value_parser = update_repo)]
+    pub update_repo: Option<String>,
+}
+
+fn update_repo(value: &str) -> Result<String, String> {
+    moni_protocol::release::valid_repo(value)
+        .then(|| value.to_owned())
+        .ok_or_else(|| "update repository must be owner/repo".to_owned())
 }
 
 fn list_item(value: &str) -> Result<String, String> {
@@ -58,5 +67,33 @@ mod tests {
         assert_eq!(config.disks, ["/", "/data"]);
         assert!(Config::try_parse_from(args.into_iter().chain(["--interval", "0"])).is_err());
         assert!(Config::try_parse_from(args.into_iter().chain(["--queue-capacity", "0"])).is_err());
+    }
+
+    #[test]
+    fn update_repository_is_optional_and_cannot_be_a_url_or_path() {
+        let args = [
+            "agent",
+            "--server",
+            "wss://example.com/ws/agent",
+            "--token",
+            "test",
+        ];
+        let config = Config::try_parse_from(args).unwrap();
+        assert!(config.update_repo.is_none());
+        let config =
+            Config::try_parse_from(args.into_iter().chain(["--update-repo", "owner/moni-rs"]))
+                .unwrap();
+        assert_eq!(config.update_repo.as_deref(), Some("owner/moni-rs"));
+        for repo in [
+            "",
+            "../repo",
+            "owner/repo/other",
+            "https://github.com/owner/repo",
+            "owner/repo\n",
+        ] {
+            assert!(
+                Config::try_parse_from(args.into_iter().chain(["--update-repo", repo])).is_err()
+            );
+        }
     }
 }

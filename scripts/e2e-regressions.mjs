@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-export async function regressions({ api, admin, socket, event, poll, base, patches, cpuFrame }) {
+export async function regressions({ api, admin, socket, hello, event, poll, base, patches, cpuFrame }) {
   const test = (action, body = {}) => api('/__test/' + action, 200,
     { method: 'POST', body }).then(r => r.json());
   const sql = (query, args = []) => test('sql', { sql: query, args });
@@ -12,6 +12,7 @@ export async function regressions({ api, admin, socket, event, poll, base, patch
   const dash = socket('/ws/dashboard', admin);
   await event(dash, 'snapshot');
   let agent = socket('/ws/agent', { Authorization: `Bearer ${current.token}` });
+  await hello(agent);
   await event(agent, 'welcome');
   let seq = 100;
   async function metrics() {
@@ -51,21 +52,73 @@ export async function regressions({ api, admin, socket, event, poll, base, patch
   assert.ok(measured.rowsRead <= 11, JSON.stringify(measured));
   assert.equal(measured.rowsWritten, 0);
   console.log(`RowsRead passed: E=100, A_other=10 -> ${otherRows} (empty baseline ${baseline}); A_current=10 -> ${measured.rowsRead}, no writes; queries=${JSON.stringify(measured.queries)}`);
-  // Reconstruct the deployed v2 layout, then exercise its real constructor migration with data.
-  await sql("ALTER TABLE alert_state RENAME TO saved_state; CREATE TABLE alert_state(rule_id TEXT,server_id TEXT,since_ms INTEGER,value REAL,PRIMARY KEY(rule_id,server_id)) WITHOUT ROWID; INSERT INTO alert_state SELECT rule_id,server_id,since_ms,value FROM saved_state; DROP TABLE saved_state; ALTER TABLE alert_events ADD COLUMN notification_json TEXT; ALTER TABLE servers DROP COLUMN country");
-  const migratedNotice = JSON.stringify({ event: 'firing', rule: { id: 'fixture' },
-    server: { id: 'regression' }, value: 50, ts_ms: now });
-  await sql("UPDATE alert_events SET notification_json=? WHERE id=(SELECT max(id) FROM alert_events)", [migratedNotice]);
-  await sql("UPDATE meta SET v='2' WHERE k='schema_version'");
-  await test('recreate');
-  assert.equal((await sql("SELECT count(*) AS n FROM alert_state WHERE server_id='regression'"))[0].n, 10);
-  assert.equal((await sql("SELECT v FROM meta WHERE k='schema_version'"))[0].v, '4');
+  const tables = ['servers', 'metrics_1m', 'metrics_1h', 'dirty_hours', 'alert_rules',
+    'alert_state', 'alert_events', 'notification_queue'];
+  for (const table of [...tables, 'agent_updates', 'meta']) {
+    assert.ok((await sql(`PRAGMA table_info(${table})`)).length, `${table} initialized`);
+  }
   assert.ok((await sql('PRAGMA table_info(servers)')).some(c => c.name === 'country'));
+  const eventColumns = await sql('PRAGMA table_info(alert_events)');
+  assert.ok(eventColumns.some(c => c.name === 'rule_name'));
+  assert.ok(eventColumns.some(c => c.name === 'server_name'));
+  assert.ok(!eventColumns.some(c => c.name === 'notification_json'));
   assert.equal((await sql('PRAGMA table_info(alert_state)')).find(c => c.pk === 1).name, 'server_id');
-  assert.equal((await sql('SELECT count(*) AS n FROM notification_queue'))[0].n, 1);
+  assert.equal((await sql("SELECT v FROM meta WHERE k='schema_version'"))[0].v, '5');
+
+  const snapshot = async (names = tables) => {
+    const result = {};
+    for (const table of names) result[table] = (await sql(`SELECT * FROM ${table}`))
+      .map(row => JSON.stringify(row)).sort();
+    result.meta = await sql("SELECT * FROM meta WHERE k!='schema_version' ORDER BY k");
+    return result;
+  };
+  const historyMinute = Math.floor(now / 3_600_000) * 3_600_000 - 4 * 3_600_000;
+  for (const table of ['metrics_1m', 'metrics_1h']) {
+    await sql(`INSERT INTO ${table}(server_id,ts_ms,cpu_avg,rx_bytes,tx_bytes) VALUES ('other-regression',?,12,123,45)`,
+      [historyMinute]);
+  }
+  await sql("INSERT INTO dirty_hours(server_id,hour_ms) VALUES ('other-regression',?)", [historyMinute]);
+  const persistedNotice = JSON.stringify({ event: 'firing', rule: { id: 'fixture' },
+    server: { id: 'regression' }, value: 50, ts_ms: now });
+  await sql("INSERT INTO notification_queue(server_id,notification_json) VALUES ('regression',?)", [persistedNotice]);
+  const preserved = await snapshot();
+  assert.equal((await sql('SELECT count(*) AS n FROM agent_updates'))[0].n, 0);
+  // Production v4 has the current tables and credentials; only agent_updates is new in v5.
+  await sql("DROP TABLE agent_updates; UPDATE meta SET v='4' WHERE k='schema_version'");
+  await test('faults', { sql: 'INSERT INTO meta (k,v)' });
+  await test('recreate');
+  assert.equal((await sql("SELECT v FROM meta WHERE k='schema_version'"))[0].v, '4');
+  assert.equal((await sql("SELECT count(*) AS n FROM sqlite_master WHERE name='agent_updates'"))[0].n, 0,
+    'Failure after CREATE rolls back the new table');
+  assert.deepEqual(await snapshot(), preserved, 'Failed migration preserves every v4 row');
+  await test('recreate');
+  assert.equal((await sql("SELECT v FROM meta WHERE k='schema_version'"))[0].v, '5');
+  assert.deepEqual(await snapshot(), preserved, 'v4 upgrade preserves every existing row and token hash');
+  await sql("INSERT INTO agent_updates(server_id,job_id,repo,version,state,error,requested_ms,updated_ms) VALUES ('regression',?,'fixture/repo','v1.0.0','failed','timeout',?,?)",
+    ['a'.repeat(32), now, now]);
+  const upgraded = await snapshot([...tables, 'agent_updates']);
+  await test('recreate');
+  assert.deepEqual(await snapshot([...tables, 'agent_updates']), upgraded, 'v5 recreation is idempotent');
+  await sql("DELETE FROM agent_updates WHERE server_id='regression'");
   await metrics();
   assert.equal((await sql('SELECT count(*) AS n FROM notification_queue'))[0].n, 0);
   await sql("DELETE FROM alert_state WHERE rule_id LIKE 'fixture-%'");
+  for (const table of ['metrics_1m', 'metrics_1h', 'dirty_hours']) {
+    await sql(`DELETE FROM ${table} WHERE server_id='other-regression'`);
+  }
+  const supported = await snapshot();
+  for (const version of ['999', null]) {
+    if (version === null) await sql("DELETE FROM meta WHERE k='schema_version'");
+    else await sql("UPDATE meta SET v=? WHERE k='schema_version'", [version]);
+    await test('recreate');
+    await api('/api/servers', 500, { headers: admin });
+    assert.deepEqual(await snapshot(), supported, 'Unsupported or unversioned data is not rewritten');
+    const stored = await sql("SELECT v FROM meta WHERE k='schema_version'");
+    assert.deepEqual(stored, version === null ? [] : [{ v: version }]);
+    await sql("INSERT INTO meta(k,v) VALUES ('schema_version','5') ON CONFLICT(k) DO UPDATE SET v='5'");
+    await test('recreate');
+  }
+  console.log('Schema passed: current initialization, v4 failure rollback/retry preserves all rows, v5 idempotence, unknown versions rejected');
 
   const notice = JSON.stringify({ event: 'firing', rule: { id: 'fixture' },
     server: { id: 'regression' }, value: 50, ts_ms: now });
@@ -112,6 +165,7 @@ export async function regressions({ api, admin, socket, event, poll, base, patch
   assert.equal(await agent.closed, 1011);
   assert.equal((await sql("SELECT * FROM metrics_1m WHERE server_id='regression'")).length, 0);
   agent = socket('/ws/agent', { Authorization: `Bearer ${current.token}` });
+  await hello(agent);
   await event(agent, 'welcome');
   await send(rollup);
   const traffic = await event(dash, 'traffic', e => e.id === 'regression' && e.traffic.rx_bytes === 100);
@@ -132,12 +186,14 @@ export async function regressions({ api, admin, socket, event, poll, base, patch
   assert.equal(await agent.closed, 1011);
   assert.equal((await sql("SELECT * FROM metrics_1m WHERE server_id='regression' AND ts_ms=?", [oldMinute])).length, 0);
   agent = socket('/ws/agent', { Authorization: `Bearer ${current.token}` });
+  await hello(agent);
   await event(agent, 'welcome');
   await send({ ...rollup, minute_ms: oldMinute, rx_bytes: 0, tx_bytes: 0 });
   assert.equal((await status()).traffic_month.rx_bytes, 250);
 
   const numeric = await create('numeric-regression');
   const numericAgent = socket('/ws/agent', { Authorization: `Bearer ${numeric.token}` });
+  await hello(numericAgent);
   await event(numericAgent, 'welcome');
   const numericMinute = Math.floor(Date.now() / 60_000) * 60_000;
   const monthStart = new Date();

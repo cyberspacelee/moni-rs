@@ -16,7 +16,8 @@
   // Free 计划只能使用 SQLite 型 DO
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
   "vars": {
-    "REPORT_INTERVAL_S": "5",
+    "REPORT_INTERVAL_S": "2",
+    "REPORT_IDLE_INTERVAL_S": "30",
     "RETENTION_MINUTE_DAYS": "7",
     "RETENTION_HOUR_DAYS": "90",
     "AGENT_RELEASE_REPO": "",

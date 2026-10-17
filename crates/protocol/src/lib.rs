@@ -4,8 +4,10 @@
 use serde::{Deserialize, Serialize};
 
 pub mod api;
+pub mod release;
+pub use api::{UpdateError, UpdateState};
 
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// WebSocket close code sent when the protocol version is incompatible.
 pub const CLOSE_INCOMPATIBLE: u16 = 4001;
@@ -66,6 +68,13 @@ pub enum AgentMessage {
         protocol: u16,
         agent_version: String,
         host: HostInfo,
+        update_repo: Option<String>,
+    },
+    UpdateStatus {
+        job_id: String,
+        version: String,
+        state: UpdateState,
+        error: Option<UpdateError>,
     },
     Metrics(MetricsFrame),
     Rollup(MinuteRollup),
@@ -111,6 +120,14 @@ pub enum HubMessage {
     Welcome {
         server_id: String,
         report_interval_s: u32,
+    },
+    SetReportInterval {
+        report_interval_s: u32,
+    },
+    Update {
+        job_id: String,
+        version: String,
+        repo: String,
     },
     Ack {
         #[cfg_attr(feature = "ts", ts(type = "number"))]

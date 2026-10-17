@@ -13,7 +13,7 @@ use crate::{
     var_u32,
 };
 
-// COALESCE keeps migrated PoC NULLs compatible with the non-null API contract.
+// Stored metric columns are nullable; the history API exposes numeric values.
 const COLUMNS: &str = "COALESCE(cpu_avg,0) AS cpu_avg, COALESCE(cpu_max,0) AS cpu_max,
     COALESCE(mem_pct,0) AS mem_pct, COALESCE(swap_pct,0) AS swap_pct,
     COALESCE(disk_pct,0) AS disk_pct, COALESCE(rx_bytes,0) AS rx_bytes,
@@ -46,6 +46,12 @@ struct HourRow {
 struct Bytes {
     rx_bytes: f64,
     tx_bytes: f64,
+}
+#[derive(Deserialize)]
+struct PreviousRollup {
+    rx_bytes: f64,
+    tx_bytes: f64,
+    unchanged: i64,
 }
 
 impl Hub {
@@ -84,6 +90,36 @@ impl Hub {
             return Ok(false);
         }
         let sql = self.state.storage().sql();
+        let values = vec![
+            id.into(),
+            rollup.minute_ms.into(),
+            f64::from(rollup.cpu_avg).into(),
+            f64::from(rollup.cpu_max).into(),
+            logic::percentage(rollup.mem_used_avg, rollup.mem_total).into(),
+            logic::percentage(rollup.swap_used_avg, rollup.swap_total).into(),
+            logic::percentage(rollup.disk_used, rollup.disk_total).into(),
+            (rollup.rx_bytes as f64).into(),
+            (rollup.tx_bytes as f64).into(),
+            (rollup.rx_bps_max as f64).into(),
+            (rollup.tx_bps_max as f64).into(),
+            f64::from(rollup.load1_avg).into(),
+        ];
+        let previous = sql
+            .exec(
+                "SELECT COALESCE(rx_bytes,0) AS rx_bytes, COALESCE(tx_bytes,0) AS tx_bytes,
+                cpu_avg IS ?3 AND cpu_max IS ?4 AND mem_pct IS ?5 AND swap_pct IS ?6
+                AND disk_pct IS ?7 AND rx_bytes IS ?8 AND tx_bytes IS ?9
+                AND rx_bps_max IS ?10 AND tx_bps_max IS ?11 AND load1 IS ?12 AS unchanged
+                FROM metrics_1m WHERE server_id = ?1 AND ts_ms = ?2",
+                values.clone(),
+            )?
+            .to_array::<PreviousRollup>()?
+            .into_iter()
+            .next();
+        // ACK retries must not spend row-write quota or dirty an already aggregated hour.
+        if previous.as_ref().is_some_and(|row| row.unchanged != 0) {
+            return Ok(false);
+        }
         let hour = logic::bucket(rollup.minute_ms, HOUR_MS);
         // Mark first so a failed minute write can only cause an unnecessary rebuild, never a stale total.
         if hour
@@ -96,32 +132,15 @@ impl Hub {
                 vec![id.into(), hour.into()],
             )?;
         }
-        let previous = sql.exec(
-            "SELECT COALESCE(rx_bytes,0) AS rx_bytes, COALESCE(tx_bytes,0) AS tx_bytes FROM metrics_1m WHERE server_id = ? AND ts_ms = ?",
-            vec![id.into(), rollup.minute_ms.into()],
-        )?.to_array::<Bytes>()?.into_iter().next();
         sql.exec(
             "INSERT OR REPLACE INTO metrics_1m
             (server_id, ts_ms, cpu_avg, cpu_max, mem_pct, swap_pct, disk_pct,
              rx_bytes, tx_bytes, rx_bps_max, tx_bps_max, load1)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            vec![
-                id.into(),
-                rollup.minute_ms.into(),
-                f64::from(rollup.cpu_avg).into(),
-                f64::from(rollup.cpu_max).into(),
-                logic::percentage(rollup.mem_used_avg, rollup.mem_total).into(),
-                logic::percentage(rollup.swap_used_avg, rollup.swap_total).into(),
-                logic::percentage(rollup.disk_used, rollup.disk_total).into(),
-                (rollup.rx_bytes as f64).into(),
-                (rollup.tx_bytes as f64).into(),
-                (rollup.rx_bps_max as f64).into(),
-                (rollup.tx_bps_max as f64).into(),
-                f64::from(rollup.load1_avg).into(),
-            ],
+            values,
         )?;
-        if let Some(traffic) = &mut conn.traffic_month
-            && rollup.minute_ms >= traffic.since_ms
+        let traffic = &mut conn.traffic_month;
+        if rollup.minute_ms >= traffic.since_ms
             && logic::month_start(rollup.minute_ms) == traffic.since_ms
         {
             let (rx, tx) = previous.map_or((0.0, 0.0), |b| (b.rx_bytes, b.tx_bytes));
@@ -232,13 +251,9 @@ impl Hub {
 
     pub(super) fn refresh_traffic(&self, ws: &WebSocket, conn: &mut AgentConn) -> Result<()> {
         let since = logic::month_start(now_ms());
-        if conn
-            .traffic_month
-            .as_ref()
-            .is_none_or(|t| t.since_ms != since)
-        {
+        if conn.traffic_month.since_ms != since {
             let traffic = self.safe_traffic_month(&conn.server_id);
-            conn.traffic_month = Some(traffic.clone());
+            conn.traffic_month = traffic.clone();
             super::save(ws, conn.clone())?;
             self.broadcast(&moni_protocol::api::DashboardEvent::Traffic {
                 id: conn.server_id.clone(),

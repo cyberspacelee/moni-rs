@@ -2,5 +2,7 @@
 import type { HostInfo } from "./HostInfo";
 import type { MetricsFrame } from "./MetricsFrame";
 import type { MinuteRollup } from "./MinuteRollup";
+import type { UpdateError } from "./UpdateError";
+import type { UpdateState } from "./UpdateState";
 
-export type AgentMessage = { "type": "hello", protocol: number, agent_version: string, host: HostInfo, } | { "type": "metrics" } & MetricsFrame | { "type": "rollup" } & MinuteRollup;
+export type AgentMessage = { "type": "hello", protocol: number, agent_version: string, host: HostInfo, update_repo: string | null, } | { "type": "update_status", job_id: string, version: string, state: UpdateState, error: UpdateError | null, } | { "type": "metrics" } & MetricsFrame | { "type": "rollup" } & MinuteRollup;

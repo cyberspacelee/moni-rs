@@ -3,6 +3,7 @@ mod queue;
 mod rollup;
 mod sampler;
 mod session;
+mod update;
 mod window;
 
 use std::{
@@ -33,6 +34,7 @@ struct State {
     window: RefCell<Window>,
     seq: Cell<u64>,
     ready: Notify,
+    sample_ready: Notify,
 }
 
 impl State {
@@ -42,6 +44,7 @@ impl State {
             window: RefCell::new(Window::default()),
             seq: Cell::new(0),
             ready: Notify::new(),
+            sample_ready: Notify::new(),
         }
     }
 
@@ -69,6 +72,7 @@ async fn collect(mut sampler: Sampler, state: &State) {
         tick.tick().await;
         let sample = sampler.sample(now_ms());
         state.window.borrow_mut().push(&sample);
+        state.sample_ready.notify_one();
         if let Some(minute) = rollup.push(&sample) {
             if let Some(minute_ms) = state.queue.borrow_mut().insert(minute) {
                 warn!(
