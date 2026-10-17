@@ -75,10 +75,10 @@ try {
     await page.click("text=添加规则");
     await page.fill('dialog input[placeholder="CPU 过高"]', `${name}-rule`);
     await page.click('dialog button[type="submit"]');
-    const rule = page.locator("div", { hasText: `${name}-rule` }).filter({ has: page.locator("text=停用") }).last();
-    await rule.locator("text=停用").click();
+    const rule = page.locator("[data-rule-row]", { hasText: `${name}-rule` });
+    await rule.getByRole("button", { name: "停用" }).click();
     await rule.locator("text=已停用").waitFor();
-    await rule.locator("text=删除").click();
+    await rule.getByRole("button", { name: "删除" }).click();
     await page.locator(`text=${name}-rule`).waitFor({ state: "detached" });
   });
 

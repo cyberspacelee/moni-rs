@@ -479,7 +479,7 @@ function AlertsTab() {
       ) : (
         <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {rules.map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div key={r.id} data-rule-row className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   {r.name}
