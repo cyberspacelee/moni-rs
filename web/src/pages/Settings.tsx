@@ -10,12 +10,10 @@ import type {
   ServerStatus,
 } from "../api/generated";
 import { Flag } from "../components/Flag";
-import { StationClock } from "../components/StationClock";
 import {
   IconAlert,
   IconBell,
   IconCheck,
-  IconHistory,
   IconKey,
   IconPencil,
   IconPlus,
@@ -40,16 +38,16 @@ import {
   cx,
 } from "../components/ui";
 import { api, errorText } from "../lib/api";
-import { ago, clockTime, dateTime } from "../lib/format";
+import { ago, dateTime } from "../lib/format";
 import { useLive } from "../lib/live";
 import { href, type SettingsTab } from "../lib/router";
 import { useNow } from "../lib/useNow";
 
-const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
-  { id: "servers", label: "服务器", icon: <IconServer size={16} /> },
-  { id: "alerts", label: "告警规则", icon: <IconBell size={16} /> },
-  { id: "events", label: "告警事件", icon: <IconHistory size={16} /> },
-  { id: "notify", label: "通知", icon: <IconSend size={16} /> },
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: "servers", label: "服务器" },
+  { id: "alerts", label: "告警规则" },
+  { id: "events", label: "告警事件" },
+  { id: "notify", label: "通知" },
 ];
 
 export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig | null }) {
@@ -64,10 +62,9 @@ export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig 
             aria-current={tab === t.id ? "page" : undefined}
             className={cx(
               "-mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm leading-none transition-colors",
-              tab === t.id ? "border-signal font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink",
+              tab === t.id ? "border-brand font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink",
             )}
           >
-            {t.icon}
             {t.label}
           </a>
         ))}
@@ -122,7 +119,7 @@ function TokenReveal({ config, token }: { config: AppConfig | null; token: strin
           <span className="text-xs font-medium text-ink-2">安装命令（在 VPS 上以 root 运行）</span>
           <CopyButton text={cmd} />
         </div>
-        <pre className="overflow-x-auto rounded-md bg-shell p-3.5 font-mono text-xs leading-relaxed text-shell-ink">{cmd}</pre>
+        <pre className="overflow-x-auto rounded-xl bg-[#1b1a19] p-4 font-mono text-xs leading-relaxed text-[#f4f3ee]">{cmd}</pre>
       </div>
       {!config?.agent_release_repo && (
         <p className="text-xs text-ink-3">未配置 AGENT_RELEASE_REPO，请把命令中的 &lt;owner&gt; 替换为你的 GitHub 仓库。</p>
@@ -214,18 +211,12 @@ function ServersTab({ config }: { config: AppConfig | null }) {
           {list.map((s) => (
             <div key={s.id} data-server-row className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
               <div className="flex min-w-0 flex-1 items-center gap-3">
-                <StationClock
-                  ms={s.online && s.metrics ? s.metrics.ts_ms : s.last_seen_ms}
-                  running={s.online && s.metrics != null}
-                  size={32}
-                  label={s.online ? "运行中" : s.last_seen_ms ? `停于 ${clockTime(s.last_seen_ms, now)}` : "从未连接"}
-                />
+                <Flag code={s.country} className="text-base" />
                 <div className="min-w-0 flex-1">
                   <a href={href({ page: "server", id: s.id })} className="block truncate leading-5 font-medium underline-offset-2 hover:underline">
                     {s.name}
                   </a>
                   <div className="mt-0.5 flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3">
-                    {s.country && <Flag code={s.country} className="text-[13px]" />}
                     <span className="truncate font-mono">{s.id}</span>
                     {s.agent_version && <span className="shrink-0">· v{s.agent_version}</span>}
                   </div>
@@ -432,7 +423,7 @@ function RuleForm({
         />
       </Field>
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" className="size-4 accent-[var(--signal)]" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} />
+        <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} />
         启用
       </label>
       <ErrorText>{error}</ErrorText>
@@ -508,15 +499,6 @@ function AlertsTab() {
           {rules.map((r) => (
             <div key={r.id} data-rule-row className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
               <div className="flex min-w-0 flex-1 items-center gap-3">
-                <span
-                  aria-hidden
-                  className={cx(
-                    "grid size-8 shrink-0 place-items-center rounded-md border",
-                    r.enabled ? "border-line bg-surface-2 text-ink" : "border-dashed border-line-strong text-ink-3",
-                  )}
-                >
-                  <IconBell size={16} />
-                </span>
                 <div className="min-w-0">
                   <div className="flex h-5 flex-wrap items-center gap-2 text-sm leading-5 font-medium">
                     {r.name}

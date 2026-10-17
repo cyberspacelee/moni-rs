@@ -4,75 +4,61 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Design tokens: a railway station clock. Enamel white ground, sign-black shell and ink, and
- * signal red reserved for the clock's second hand. State colours (green / amber / crimson) only
- * ever mean state and always travel with an icon or a word; the crimson is pulled toward pink
- * so it never reads as the signal red.
+ * Design tokens. Warm ivory and slate neutrals with one clay accent for actions and selection;
+ * green / amber / red stay reserved for state and always travel with a word or an icon.
  */
 :root {
-  --bg: #f3f3f0;
+  --bg: #faf9f5;
   --surface: #ffffff;
-  --surface-2: #ebebe7;
-  --line: #dddcd6;
-  --line-strong: #c6c5be;
-  --ink: #111111;
-  --ink-2: #45443f;
-  --ink-3: #6b6a64;
-  --brand: #111111;
-  --brand-strong: #2e2e2c;
-  --brand-soft: #e4e4df;
-  --brand-ink: #111111;
-  --shell: #111111;
-  --shell-ink: #f3f3f0;
-  --shell-ink-2: #a7a69f;
-  --shell-line: #2c2c2a;
-  --signal: #e63312;
-  --clock-face: #ffffff;
+  --surface-2: #f2f0e9;
+  --line: #e8e6dc;
+  --line-strong: #d6d3c7;
+  --ink: #141413;
+  --ink-2: #4d4c48;
+  --ink-3: #73726c;
+  --brand: #b9532f;
+  --brand-strong: #a14626;
+  --brand-soft: #f7e9e1;
+  --brand-ink: #9a4424;
 
-  /* Chart roles: clock ink first, a burnt orange second — apart in hue and in lightness. */
-  --series-1: #1f1f1e;
-  --series-2: #c2561a;
-  --chart-grid: #e6e5e0;
-  --chart-axis: #807f78;
-  --status-good: #13843a;
-  --status-warning: #a87200;
-  --status-critical: #c81e4a;
-  --status-good-soft: #e3f2e7;
-  --status-critical-soft: #fae8ed;
+  /* Chart roles: clay first, a quiet sky blue second — apart in hue and lightness. */
+  --series-1: #c96442;
+  --series-2: #5b8fc4;
+  --chart-grid: #ece9df;
+  --chart-axis: #8a8982;
+  --status-good: #2e7d4f;
+  --status-warning: #b07a12;
+  --status-critical: #c8372d;
+  --status-good-soft: #e6f2ea;
+  --status-critical-soft: #fbe9e7;
 }
 :root.dark {
-  --bg: #0f0f0e;
-  --surface: #181817;
-  --surface-2: #222220;
-  --line: #2b2b29;
-  --line-strong: #3d3d3a;
-  --ink: #ecebe6;
-  --ink-2: #b4b3ac;
-  --ink-3: #8b8a84;
-  --brand: #ecebe6;
-  --brand-strong: #ffffff;
-  --brand-soft: #2a2a28;
-  --brand-ink: #ecebe6;
-  --shell: #050505;
-  --shell-ink: #ecebe6;
-  --shell-ink-2: #8f8e88;
-  --shell-line: #262624;
-  --signal: #ff5533;
-  --clock-face: #ecebe6;
+  --bg: #1b1a19;
+  --surface: #242322;
+  --surface-2: #2d2c2a;
+  --line: #353431;
+  --line-strong: #46443f;
+  --ink: #f4f3ee;
+  --ink-2: #c4c2b9;
+  --ink-3: #9b9990;
+  --brand: #d97757;
+  --brand-strong: #e48a6c;
+  --brand-soft: rgb(217 119 87 / 0.16);
+  --brand-ink: #eba48b;
 
-  --series-1: #e4e3dd;
-  --series-2: #f0813f;
-  --chart-grid: #252523;
-  --chart-axis: #7d7c76;
-  --status-good: #43c46a;
-  --status-warning: #e3ac33;
-  --status-critical: #f2668a;
-  --status-good-soft: rgb(67 196 106 / 0.13);
-  --status-critical-soft: rgb(242 102 138 / 0.14);
+  --series-1: #d97757;
+  --series-2: #7fb0e0;
+  --chart-grid: #2e2d2b;
+  --chart-axis: #85837b;
+  --status-good: #5cb87d;
+  --status-warning: #e0a83a;
+  --status-critical: #ec6b5e;
+  --status-good-soft: rgb(92 184 125 / 0.14);
+  --status-critical-soft: rgb(236 107 94 / 0.15);
 }
 
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -86,11 +72,6 @@
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
   --color-brand-ink: var(--brand-ink);
-  --color-signal: var(--signal);
-  --color-shell: var(--shell);
-  --color-shell-ink: var(--shell-ink);
-  --color-shell-ink-2: var(--shell-ink-2);
-  --color-shell-line: var(--shell-line);
   --color-good: var(--status-good);
   --color-warn: var(--status-warning);
   --color-crit: var(--status-critical);
@@ -110,10 +91,10 @@
     @apply outline-2 outline-offset-2 outline-brand;
   }
   ::selection {
-    background: color-mix(in oklab, var(--signal) 24%, transparent);
+    background: var(--brand-soft);
   }
   input {
-    caret-color: var(--signal);
+    caret-color: var(--brand);
   }
 }
 
@@ -131,16 +112,4 @@
 .uplot {
   font-family: var(--font-sans);
   color: inherit;
-}
-
-/* The second hand jumps to each new frame and settles, rather than sweeping between frames. */
-.clock-hand {
-  transform-box: view-box;
-  transform-origin: 50% 50%;
-  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-@media (prefers-reduced-motion: reduce) {
-  .clock-hand {
-    transition: none;
-  }
 }

@@ -1,16 +1,44 @@
 {
-  "northStar": "The Station Clock Network",
+  "northStar": "The Quiet Instrument",
   "motion": {
-    "clock-second-hand": { "duration": "320ms", "easing": "cubic-bezier(0.22, 1, 0.36, 1)", "reducedMotion": "none" },
-    "meter-fill": { "duration": "500ms", "easing": "ease-out" },
-    "control-color": { "duration": "150ms" }
+    "meter-fill": {
+      "duration": "500ms",
+      "easing": "ease-out"
+    },
+    "control-color": {
+      "duration": "150ms"
+    }
   },
   "elevation": {
-    "card-hover": "0 6px 20px -10px rgb(0 0 0 / 0.25)",
+    "panel": "0 1px 2px rgb(20 20 19 / 0.04)",
+    "card-hover": "0 8px 24px -12px rgb(20 20 19 / 0.18)",
     "tooltip": "0 8px 24px -8px rgb(0 0 0 / 0.25)"
   },
-  "focus": { "outline": "2px solid var(--brand)", "offset": "2px" },
-  "breakpoints": { "sm": "640px", "md": "768px", "lg": "1024px", "xl": "1280px" },
-  "themes": { "dark": { "shell": "#050505", "clock-face": "#ecebe6", "series-1": "#e4e3dd", "series-2": "#f0813f", "state-good": "#43c46a", "state-warning": "#e3ac33", "state-critical": "#f2668a" } },
-  "rules": ["One Meaning", "Hollow Ring", "Numerals Only"]
+  "focus": {
+    "ring": "3px var(--brand) at 15%",
+    "border": "var(--brand)"
+  },
+  "breakpoints": {
+    "sm": "640px",
+    "md": "768px",
+    "lg": "1024px",
+    "xl": "1280px"
+  },
+  "themes": {
+    "dark": {
+      "ground": "#1b1a19",
+      "surface": "#242322",
+      "ink": "#f4f3ee",
+      "clay": "#d97757",
+      "series-2": "#7fb0e0",
+      "state-good": "#5cb87d",
+      "state-warning": "#e0a83a",
+      "state-critical": "#ec6b5e"
+    }
+  },
+  "rules": [
+    "State Words",
+    "Words before icons",
+    "No filler copy"
+  ]
 }

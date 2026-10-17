@@ -1,9 +1,8 @@
 import { type ReactNode, useState } from "react";
 import type { ServerStatus } from "../api/generated";
 import { Flag, countryName } from "../components/Flag";
-import { IconAlert, IconDown, IconSearch, IconServer, IconUp } from "../components/icons";
+import { IconAlert, IconSearch, IconServer } from "../components/icons";
 import { Sparkline } from "../components/Sparkline";
-import { StationClock } from "../components/StationClock";
 import { Badge, Card, EmptyState, Meter, PageSpinner, Segmented, StatusDot, levelColor } from "../components/ui";
 import { ago, bytes, clockTime, duration, pct, rate } from "../lib/format";
 import { type RecentPoint, useLive } from "../lib/live";
@@ -13,10 +12,20 @@ import { useNow } from "../lib/useNow";
 /** One reading in the summary strip: hairline-separated, no box, the numeral carries it. */
 function Reading({ label, children, sub }: { label: string; children: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="min-w-0 bg-surface px-4 py-3 sm:px-5">
+    <div className="min-w-0 bg-surface px-5 py-4">
       <div className="text-xs leading-4 text-ink-3">{label}</div>
       <div className="tabular mt-1 truncate text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">{children}</div>
       {sub && <div className="tabular mt-0.5 truncate text-xs leading-4 text-ink-3">{sub}</div>}
+    </div>
+  );
+}
+
+/** A label / value line in the card's detail list, aligned with the meter rows above it. */
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <dt className="shrink-0 text-ink-3">{label}</dt>
+      <dd className="truncate text-ink-2">{children}</dd>
     </div>
   );
 }
@@ -30,12 +39,10 @@ function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: 
   const m = s.metrics;
   const cpu = m?.cpu_pct ?? null;
   const live = s.online && m != null;
-  const clockLabel = live ? "运行中" : s.last_seen_ms ? `停于 ${clockTime(s.last_seen_ms, now)}` : "从未连接";
   return (
-    <a href={href({ page: "server", id: s.id })} data-server-card className="group block min-w-0 rounded-[10px]">
-      <Card className="flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-150 group-hover:border-line-strong group-hover:shadow-[0_6px_20px_-10px_rgb(0_0_0/0.25)]">
-        <div className="flex items-center gap-3 px-4 pt-4 sm:px-5">
-          <StationClock ms={live ? m.ts_ms : s.last_seen_ms} running={live} size={36} label={clockLabel} />
+    <a href={href({ page: "server", id: s.id })} data-server-card className="group block min-w-0 rounded-2xl">
+      <Card className="flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-150 group-hover:border-line-strong group-hover:shadow-[0_8px_24px_-12px_rgb(20_20_19/0.18)]">
+        <div className="flex items-start gap-3 px-5 pt-5">
           <div className="min-w-0 flex-1">
             <div className="flex h-5 items-center gap-2">
               <span className="truncate leading-5 font-semibold">{s.name}</span>
@@ -46,7 +53,7 @@ function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: 
                 </Badge>
               )}
             </div>
-            <div className="mt-0.5 flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3">
+            <div className="mt-1 flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3">
               {s.country && <Flag code={s.country} className="text-[13px]" />}
               <span className="truncate">{hostLine(s)}</span>
             </div>
@@ -56,7 +63,7 @@ function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: 
 
         {live ? (
           <>
-            <div className="mt-3 flex items-end gap-3 px-4 sm:px-5">
+            <div className="mt-4 flex items-end gap-4 px-5">
               <div className="shrink-0">
                 <div className="tabular text-3xl leading-8 font-semibold tracking-tight">
                   {cpu == null ? "–" : cpu.toFixed(0)}
@@ -68,38 +75,29 @@ function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: 
                 <Sparkline values={recent.map((p) => p.cpu)} color={levelColor(cpu)} />
               </div>
             </div>
-            <div className="mt-4 space-y-3 border-t border-line px-4 pt-3.5 pb-4 sm:px-5">
+            <div className="mt-4 space-y-3 border-t border-line px-5 pt-4 pb-5">
               <Meter label="内存" value={pct(m.mem_used, m.mem_total)} detail={`${bytes(m.mem_used)} / ${bytes(m.mem_total, 0)}`} />
               <Meter label="磁盘" value={pct(m.disk_used, m.disk_total)} detail={`${bytes(m.disk_used, 0)} / ${bytes(m.disk_total, 0)}`} />
-              <div className="tabular grid grid-cols-2 gap-x-4 border-t border-line pt-3 text-xs leading-4">
-                <div className="flex items-center gap-1.5">
-                  <IconDown size={14} className="shrink-0 text-[var(--series-1)]" />
-                  <span className="text-ink-3">下行</span>
-                  <span className="ml-auto truncate font-medium">{rate(m.net_rx_bps)}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <IconUp size={14} className="shrink-0 text-[var(--series-2)]" />
-                  <span className="text-ink-3">上行</span>
-                  <span className="ml-auto truncate font-medium">{rate(m.net_tx_bps)}</span>
-                </div>
-              </div>
-              <div className="tabular flex justify-between gap-2 text-xs leading-4 text-ink-3">
-                <span className="truncate">
-                  本月 ↓ {bytes(s.traffic_month.rx_bytes)} · ↑ {bytes(s.traffic_month.tx_bytes)}
-                </span>
-                <span className="shrink-0">运行 {duration(m.uptime_s)}</span>
-              </div>
+              <dl className="tabular space-y-1.5 border-t border-line pt-3 text-xs leading-4">
+                <Row label="网络">
+                  ↓ {rate(m.net_rx_bps)}
+                  <span className="mx-1.5 text-line-strong">/</span>↑ {rate(m.net_tx_bps)}
+                </Row>
+                <Row label="本月流量">
+                  ↓ {bytes(s.traffic_month.rx_bytes)}
+                  <span className="mx-1.5 text-line-strong">/</span>↑ {bytes(s.traffic_month.tx_bytes)}
+                </Row>
+                <Row label="运行时间">{duration(m.uptime_s)}</Row>
+              </dl>
             </div>
           </>
         ) : (
-          // A stopped clock keeps its place on the board: the card stays, stamped with when it stopped.
-          <div className="mt-4 border-t border-dashed border-line-strong px-4 pt-3.5 pb-4 sm:px-5">
-            <div className="tabular text-xl leading-7 font-semibold tracking-tight text-ink-2">
-              {s.online ? "等待数据…" : s.last_seen_ms ? `停于 ${clockTime(s.last_seen_ms, now)}` : "尚未接入"}
-            </div>
-            <div className="mt-1 text-xs leading-4 text-ink-3">
-              {s.online ? "Agent 已连接，首帧即将到达" : s.last_seen_ms ? `${ago(s.last_seen_ms, now)}失去心跳` : "在 VPS 上运行安装命令后，这只钟会开始走"}
-            </div>
+          <div className="mt-4 border-t border-line px-5 pt-4 pb-5 text-sm leading-5 text-ink-3">
+            {s.online
+              ? "等待首帧数据…"
+              : s.last_seen_ms
+                ? `最后在线 ${clockTime(s.last_seen_ms, now)}（${ago(s.last_seen_ms, now)}）`
+                : "尚未接入，在 VPS 上运行安装命令后会出现数据"}
           </div>
         )}
       </Card>
@@ -138,8 +136,8 @@ export function Overview({ admin }: { admin: boolean }) {
       {/* 1px gaps over a line-coloured ground draw the hairlines between readings at any column count. */}
       <section
         aria-label="汇总"
-        className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-line bg-line lg:grid-cols-4">
-        <Reading label="在线" sub={list.length - online.length ? `${list.length - online.length} 台停走` : "全部在走"}>
+        className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_1px_2px_rgb(20_20_19/0.04)] lg:grid-cols-4">
+        <Reading label="在线" sub={list.length - online.length ? `${list.length - online.length} 台离线` : "全部在线"}>
           {online.length}
           <span className="text-base font-normal text-ink-3"> / {list.length}</span>
         </Reading>
@@ -165,7 +163,7 @@ export function Overview({ admin }: { admin: boolean }) {
           {admin ? (
             <>
               前往{" "}
-              <a className="font-medium text-ink underline underline-offset-2" href={href({ page: "settings", tab: "servers" })}>
+              <a className="font-medium text-brand underline-offset-4 hover:underline" href={href({ page: "settings", tab: "servers" })}>
                 管理 → 服务器
               </a>{" "}
               添加第一台，并在 VPS 上运行安装命令。
@@ -185,7 +183,7 @@ export function Overview({ admin }: { admin: boolean }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜索名称或地区"
-                className="h-10 w-full rounded-md border border-line bg-surface pr-3 pl-9 text-sm placeholder:text-ink-3 focus:border-ink-3 focus:ring-3 focus:ring-ink/8 focus:outline-none sm:h-9"
+                className="h-10 w-full rounded-lg border border-line bg-surface pr-3 pl-9 text-sm placeholder:text-ink-3 focus:border-brand focus:ring-3 focus:ring-brand/15 focus:outline-none sm:h-9"
               />
             </label>
             <Segmented

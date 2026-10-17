@@ -89,19 +89,19 @@ export function IconGitHub({ size = 16, className }: { size?: number; className?
   );
 }
 
-/**
- * The mark: a station clock at ten past ten, its red second hand the only colour. Fixed inks,
- * so it reads the same on the black shell, on paper and on the dark theme.
- */
+/** The mark: a lowercase "m" drawn as one smoothed metric line, white on the clay accent. */
 export function Logo({ className = "size-7" }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden>
-      <circle cx="16" cy="16" r="15" fill="#f3f3f0" stroke="#111" strokeWidth="1.5" />
-      <path d="M16 3.2v2.6M28.8 16h-2.6M16 28.8v-2.6M3.2 16h2.6" stroke="#111" strokeWidth="1.6" />
-      <path d="M16 16 11.4 13.3M16 16 22.9 9.1" stroke="#111" strokeWidth="2.4" strokeLinecap="round" />
-      <path d="M16 20.5V6.8" stroke="#e63312" strokeWidth="1.2" />
-      <circle cx="16" cy="7.4" r="2.3" fill="#e63312" />
-      <circle cx="16" cy="16" r="1.3" fill="#111" />
+      <rect width="32" height="32" rx="8" fill="var(--brand)" />
+      <path
+        d="M8 21.5v-6.75C8 12.4 9.5 11 11.25 11S14.5 12.4 14.5 14.75v4.75M14.5 14.75c0-2.35 1.5-3.75 3.25-3.75S21 12.4 21 14.75v3.5c0 2 1 3.25 3 3.25"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

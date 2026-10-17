@@ -12,15 +12,13 @@ import { IconCheck, IconCopy } from "./icons";
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 export { cx };
 
-type Variant = "primary" | "secondary" | "ghost" | "danger" | "shell";
+type Variant = "primary" | "secondary" | "ghost" | "danger";
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-brand text-bg shadow-[0_1px_2px_rgb(0_0_0/0.12)] hover:bg-brand-strong",
-  secondary: "border border-line bg-surface text-ink shadow-xs hover:border-line-strong hover:bg-surface-2",
+    "bg-brand text-white shadow-[0_1px_2px_rgb(0_0_0/0.1)] hover:bg-brand-strong dark:text-[#1b1a19]",
+  secondary: "border border-line bg-surface text-ink shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-line-strong",
   ghost: "text-ink-2 hover:bg-surface-2 hover:text-ink",
   danger: "text-crit hover:bg-crit-soft",
-  /** On the black station-sign bar. */
-  shell: "text-shell-ink-2 hover:bg-white/8 hover:text-shell-ink",
 };
 
 export function Button({
@@ -33,7 +31,7 @@ export function Button({
     <button
       {...props}
       className={cx(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium leading-none whitespace-nowrap transition-[background-color,border-color,color] duration-150 select-none disabled:pointer-events-none disabled:opacity-45",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-medium leading-none whitespace-nowrap transition-[background-color,border-color,color] duration-150 select-none disabled:pointer-events-none disabled:opacity-45",
         size === "sm" ? "h-8 px-2.5 text-xs" : size === "icon" ? "size-8" : "h-9 px-3.5 text-sm",
         VARIANTS[variant],
         className,
@@ -43,7 +41,7 @@ export function Button({
 }
 
 const control =
-  "w-full rounded-md border border-line bg-surface text-sm text-ink shadow-xs transition-colors placeholder:text-ink-3 hover:border-line-strong focus:border-ink-3 focus:outline-none focus:ring-3 focus:ring-ink/8";
+  "w-full rounded-lg border border-line bg-surface text-sm text-ink shadow-xs transition-colors placeholder:text-ink-3 hover:border-line-strong focus:border-brand focus:outline-none focus:ring-3 focus:ring-brand/15";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(control, "h-10 px-3 sm:h-9", className)} />;
@@ -65,7 +63,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cx("rounded-[10px] border border-line bg-surface", className)}>
+    <div className={cx("rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgb(20_20_19/0.04)]", className)}>
       {children}
     </div>
   );
@@ -99,7 +97,7 @@ export function Badge({
   return (
     <span
       className={cx(
-        "inline-flex h-5 items-center gap-1 rounded px-1.5 text-[11px] leading-none font-medium whitespace-nowrap",
+        "inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px] leading-none font-medium whitespace-nowrap",
         tones[tone],
         className,
       )}
@@ -109,7 +107,7 @@ export function Badge({
   );
 }
 
-/** Fill colour for a utilisation percentage: graphite normally, status colours near the limit. */
+/** Fill colour for a utilisation percentage: the accent normally, status colours near the limit. */
 export const levelColor = (v: number | null) =>
   v == null ? "transparent" : v >= 90 ? "var(--status-critical)" : v >= 80 ? "var(--status-warning)" : "var(--series-1)";
 
@@ -129,7 +127,7 @@ export function Meter({ label, value, detail }: { label: string; value: number |
         </span>
       </div>
       <div
-        className="h-1.5 overflow-hidden rounded-[2px] bg-surface-2"
+        className="h-1.5 overflow-hidden rounded-full bg-surface-2"
         role="meter"
         aria-label={label}
         aria-valuemin={0}
@@ -137,7 +135,7 @@ export function Meter({ label, value, detail }: { label: string; value: number |
         aria-valuenow={value ?? undefined}
       >
         <div
-          className="h-full transition-[width] duration-500 ease-out"
+          className="h-full rounded-full transition-[width] duration-500 ease-out"
           style={{ width: `${v}%`, background: levelColor(value) }}
         />
       </div>
@@ -178,7 +176,7 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
       // Bottom sheet on phones, centred dialog from sm up.
-      className="mx-auto mt-auto mb-0 max-h-[90dvh] w-full max-w-none rounded-t-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/45 sm:m-auto sm:w-[min(34rem,calc(100vw-2rem))] sm:rounded-xl"
+      className="mx-auto mt-auto mb-0 max-h-[90dvh] w-full max-w-none rounded-t-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/35 sm:m-auto sm:w-[min(34rem,calc(100vw-2rem))] sm:rounded-2xl"
     >
       {open && (
         <div className="space-y-5 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6">
@@ -195,8 +193,8 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
 
 export function EmptyState({ title, icon, children }: { title: string; icon?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="rounded-[10px] border border-dashed border-line-strong px-6 py-14 text-center">
-      {icon && <div className="mx-auto mb-3 grid size-10 place-items-center rounded-lg bg-surface-2 text-ink-2">{icon}</div>}
+    <div className="rounded-2xl border border-dashed border-line-strong px-6 py-14 text-center">
+      {icon && <div className="mx-auto mb-3 grid size-10 place-items-center rounded-xl bg-surface-2 text-ink-3">{icon}</div>}
       <p className="text-sm font-medium">{title}</p>
       {children && <div className="mt-1.5 text-sm text-ink-3">{children}</div>}
     </div>
@@ -239,7 +237,7 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="no-scrollbar inline-flex max-w-full overflow-x-auto rounded-md border border-line bg-surface p-0.5">
+    <div role="tablist" aria-label={label} className="no-scrollbar inline-flex max-w-full overflow-x-auto rounded-lg bg-surface-2 p-0.5">
       {options.map((o) => (
         <button
           key={o.id}
@@ -247,8 +245,8 @@ export function Segmented<T extends string>({
           aria-selected={value === o.id}
           onClick={() => onChange(o.id)}
           className={cx(
-            "tabular inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[4px] px-3 text-xs leading-none font-medium transition-colors",
-            value === o.id ? "bg-brand text-bg" : "text-ink-2 hover:bg-surface-2 hover:text-ink",
+            "tabular inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs leading-none font-medium transition-colors",
+            value === o.id ? "bg-surface text-ink shadow-[0_1px_3px_rgb(0_0_0/0.1)]" : "text-ink-3 hover:text-ink",
           )}
         >
           {o.label}

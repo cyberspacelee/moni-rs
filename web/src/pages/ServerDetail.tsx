@@ -3,21 +3,14 @@ import type { History, HistoryPoint, HistoryRange, ServerStatus } from "../api/g
 import { Chart, type ChartSeries } from "../components/Chart";
 import { Flag, countryName } from "../components/Flag";
 import {
-  IconActivity,
   IconAlert,
   IconBack,
   IconChevron,
-  IconCpu,
-  IconDisk,
   IconDown,
-  IconGauge,
   IconHistory,
-  IconMemory,
   IconServer,
-  IconSliders,
   IconUp,
 } from "../components/icons";
-import { StationClock } from "../components/StationClock";
 import { Badge, Card, EmptyState, ErrorText, PageSpinner, Segmented, Spinner, StatusDot, cx, levelColor } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { ago, bytes, clockTime, dateTime, duration, pct, pctText, rate } from "../lib/format";
@@ -66,19 +59,16 @@ function shortRate(v: number): string {
 }
 
 /** One cell of the reading strip; utilisation cells carry a hairline meter under the value. */
-function Reading({ label, icon, value, sub, level }: { label: string; icon: ReactNode; value: ReactNode; sub?: ReactNode; level?: number | null }) {
+function Reading({ label, value, sub, level }: { label: string; value: ReactNode; sub?: ReactNode; level?: number | null }) {
   return (
-    <div className="min-w-0 bg-surface px-4 py-3">
-      <div className="flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3">
-        {icon}
-        {label}
-      </div>
+    <div className="min-w-0 bg-surface px-5 py-4">
+      <div className="text-xs leading-4 text-ink-3">{label}</div>
       <div className="tabular mt-1.5 truncate text-lg leading-7 font-semibold tracking-tight">{value}</div>
       {sub && <div className="tabular truncate text-xs leading-4 text-ink-3">{sub}</div>}
       {level !== undefined && (
-        <div aria-hidden className="mt-2 h-1 bg-surface-2">
+        <div aria-hidden className="mt-2.5 h-1 overflow-hidden rounded-full bg-surface-2">
           <div
-            className="h-full transition-[width] duration-500"
+            className="h-full rounded-full transition-[width] duration-500"
             style={{ width: `${Math.min(100, Math.max(0, level ?? 0))}%`, background: levelColor(level ?? null) }}
           />
         </div>
@@ -177,7 +167,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
   if (!s)
     return (
       <EmptyState title="服务器不存在" icon={<IconServer size={18} />}>
-        <a className="font-medium text-ink underline underline-offset-2" href="#/">
+        <a className="font-medium text-brand underline-offset-4 hover:underline" href="#/">
           返回总览
         </a>
       </EmptyState>
@@ -211,7 +201,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
     <div className="space-y-6 sm:space-y-8">
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-2">
-          <a href="#/" className="-ml-1.5 inline-flex h-8 items-center gap-1 rounded-md px-1.5 text-sm leading-none text-ink-2 hover:bg-surface-2 hover:text-ink">
+          <a href="#/" className="-ml-1.5 inline-flex h-8 items-center gap-1 rounded-lg px-1.5 text-sm leading-none text-ink-3 hover:text-ink">
             <IconBack size={16} />
             总览
           </a>
@@ -219,18 +209,17 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
             {admin && (
               <a
                 href={href({ page: "settings", tab: "servers" })}
-                className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-sm leading-none font-medium text-ink-2 hover:text-ink"
+                className="mr-1 inline-flex h-8 items-center rounded-lg border border-line bg-surface px-3 text-sm leading-none font-medium text-ink-2 hover:text-ink"
               >
-                <IconSliders size={16} />
                 管理
               </a>
             )}
             {prev && next && (
               <nav aria-label="切换服务器" className="flex items-center gap-1">
-                <a href={href({ page: "server", id: prev.id })} title={`上一台：${prev.name}（←）`} aria-label={`上一台：${prev.name}`} className="grid size-8 place-items-center rounded-md border border-line bg-surface text-ink-2 hover:text-ink">
+                <a href={href({ page: "server", id: prev.id })} title={`上一台：${prev.name}（←）`} aria-label={`上一台：${prev.name}`} className="grid size-8 place-items-center rounded-lg border border-line bg-surface text-ink-2 hover:text-ink">
                   <IconBack size={16} />
                 </a>
-                <a href={href({ page: "server", id: next.id })} title={`下一台：${next.name}（→）`} aria-label={`下一台：${next.name}`} className="grid size-8 place-items-center rounded-md border border-line bg-surface text-ink-2 hover:text-ink">
+                <a href={href({ page: "server", id: next.id })} title={`下一台：${next.name}（→）`} aria-label={`下一台：${next.name}`} className="grid size-8 place-items-center rounded-lg border border-line bg-surface text-ink-2 hover:text-ink">
                   <IconChevron size={16} />
                 </a>
               </nav>
@@ -238,13 +227,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
           </div>
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
-          <StationClock
-            ms={s.online && m ? m.ts_ms : s.last_seen_ms}
-            running={s.online && m != null}
-            size={52}
-            label={s.online && m ? "运行中" : s.last_seen_ms ? `停于 ${clockTime(s.last_seen_ms, now)}` : "从未连接"}
-          />
-          <div className="min-w-0 flex-1 space-y-1">
+          <div className="min-w-0 flex-1 space-y-1.5">
             <div className="flex items-center gap-3">
               <h1 className="min-w-0 truncate text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">{s.name}</h1>
               <StatusDot online={s.online} />
@@ -271,47 +254,42 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-line bg-line md:grid-cols-3 xl:grid-cols-6">
-        <Reading label="CPU" icon={<IconCpu size={14} />} value={pctText(m?.cpu_pct)} sub={s.host ? `${s.host.cpu_cores} 核` : undefined} level={m?.cpu_pct ?? null} />
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_1px_2px_rgb(20_20_19/0.04)] md:grid-cols-3 xl:grid-cols-6">
+        <Reading label="CPU" value={pctText(m?.cpu_pct)} sub={s.host ? `${s.host.cpu_cores} 核` : undefined} level={m?.cpu_pct ?? null} />
         <Reading
           label="内存"
-          icon={<IconMemory size={14} />}
           value={pctText(memPct)}
           sub={m ? `${bytes(m.mem_used)} / ${bytes(m.mem_total)}` : undefined}
           level={memPct}
         />
         <Reading
           label="磁盘"
-          icon={<IconDisk size={14} />}
           value={pctText(diskPct)}
           sub={m ? `${bytes(m.disk_used)} / ${bytes(m.disk_total)}` : undefined}
           level={diskPct}
         />
         <Reading
           label="网络"
-          icon={<IconActivity size={14} />}
           value={
             <span className="inline-flex items-center gap-1">
-              <IconDown size={16} className="text-[var(--series-1)]" />
+              <IconDown size={16} className="text-ink-3" />
               {rate(m?.net_rx_bps)}
             </span>
           }
           sub={
             <span className="inline-flex items-center gap-1">
-              <IconUp size={12} className="text-[var(--series-2)]" />
+              <IconUp size={12} />
               {rate(m?.net_tx_bps)}
             </span>
           }
         />
         <Reading
           label="本月流量"
-          icon={<IconHistory size={14} />}
           value={bytes(s.traffic_month.rx_bytes + s.traffic_month.tx_bytes)}
           sub={`↓ ${bytes(s.traffic_month.rx_bytes)} · ↑ ${bytes(s.traffic_month.tx_bytes)}`}
         />
         <Reading
           label="负载"
-          icon={<IconGauge size={14} />}
           value={m ? m.load1.toFixed(2) : "–"}
           sub={m ? `运行 ${duration(m.uptime_s)} · ${m.process_count} 进程` : undefined}
         />
@@ -355,7 +333,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
           <Card>
             <dl className="grid text-sm sm:grid-cols-2">
               {hostRows.map(([k, v], i) => (
-                <div key={k} className={cx("flex items-baseline gap-4 border-line px-4 py-2.5 sm:px-5", i > 0 && "border-t", i === 1 && "sm:border-t-0")}>
+                <div key={k} className={cx("flex items-baseline gap-4 border-line px-5 py-3", i > 0 && "border-t", i === 1 && "sm:border-t-0")}>
                   <dt className="w-16 shrink-0 leading-5 text-ink-3">{k}</dt>
                   <dd className={cx("min-w-0 leading-5 break-words", MONO_ROWS.has(k) && "font-mono text-[13px]")}>{v}</dd>
                 </div>
