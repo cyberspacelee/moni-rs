@@ -56,6 +56,7 @@ cp crates/worker/.dev.vars.example crates/worker/.dev.vars
 npm run dev                                         # http://127.0.0.1:8787 ，密码见 .dev.vars
 
 # 前端热更新：另开终端，在 web/ 下执行 npm run dev（代理 /api、/ws 到 8787）
+# 注意：wrangler dev 只在启动时读取 web/dist 资源清单，重新 build 前端后需重启 npm run dev
 
 # 添加服务器拿到 token 后，启动 Agent：
 cargo run -p moni-agent -- --server ws://127.0.0.1:8787/ws/agent --token mn_xxx_yyy
