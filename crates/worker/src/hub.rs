@@ -1,5 +1,6 @@
 //! Persistent state lives in SQLite; live connection state survives hibernation in attachments.
 
+mod alerts;
 mod data;
 mod schema;
 mod servers;
@@ -36,6 +37,10 @@ struct AgentConn {
     latest: Option<MetricsFrame>,
     #[serde(default)]
     parse_warn_ms: Option<i64>,
+    #[serde(default)]
+    pending: HashMap<String, i64>,
+    #[serde(default)]
+    pending_warn_ms: Option<i64>,
 }
 
 fn tag_for(id: &str) -> String {
@@ -77,6 +82,7 @@ pub struct Hub {
     state: State,
     env: Env,
     login_failures: RefCell<LoginFailures>,
+    rules_cache: RefCell<Option<Vec<moni_protocol::api::AlertRule>>>,
 }
 
 impl DurableObject for Hub {
@@ -84,15 +90,25 @@ impl DurableObject for Hub {
         if schema::migrate(&state.storage().sql()).is_err() {
             console_error!("Hub schema migration failed");
         }
-        Self {
+        let hub = Self {
             state,
             env,
             login_failures: RefCell::default(),
+            rules_cache: RefCell::default(),
+        };
+        if hub.rules().is_err() {
+            console_error!("Hub alert rule loading failed");
         }
+        hub
     }
 
     async fn fetch(&self, req: Request) -> Result<Response> {
-        error::finish(self.route(req).await)
+        let is_test = req.path() == "/api/alerts/test";
+        let result = self.route(req).await;
+        if !is_test && let Err(error) = self.dispatch_notifications() {
+            console_error!("Hub notification dispatch failed: {}", error);
+        }
+        error::finish(result)
     }
 
     async fn websocket_message(
@@ -158,6 +174,7 @@ impl DurableObject for Hub {
             }
             AgentMessage::Metrics(frame) => {
                 conn.latest = Some(frame.clone());
+                self.evaluate_metrics(&mut conn, &frame)?;
                 save(&ws, conn.clone())?;
                 self.broadcast(&DashboardEvent::Metrics {
                     id: conn.server_id,
@@ -172,6 +189,7 @@ impl DurableObject for Hub {
                 })?;
             }
         }
+        self.dispatch_notifications()?;
         Ok(())
     }
 
@@ -214,6 +232,12 @@ impl DurableObject for Hub {
                 let _ = ws.close(Some(4000), Some("stale"));
             }
         }
+        if let Err(error) = self.evaluate_offline(now) {
+            console_error!("Hub offline alerts failed: {}", error);
+        }
+        if let Err(error) = self.dispatch_notifications() {
+            console_error!("Hub notification dispatch failed: {}", error);
+        }
         if let Err(error) = self.maintain(now) {
             console_error!("Hub maintenance failed: {}", error);
         }
@@ -234,9 +258,21 @@ impl Hub {
             (Method::Post, "/api/auth/login") => self.login(req).await,
             (Method::Get, "/ws/agent") => self.accept_agent(req).await,
             (Method::Get, "/ws/dashboard") => self.accept_dash(),
+            (Method::Get, "/api/alerts/rules") => Response::from_json(&self.rules()?),
+            (Method::Post, "/api/alerts/rules") => self.create_rule(req).await,
+            (Method::Get, "/api/alerts/active") => Response::from_json(&self.active_alerts()?),
+            (Method::Get, "/api/alerts/events") => self.alert_events(&req),
+            (Method::Post, "/api/alerts/test") => self.test_notifications().await,
             (Method::Get, "/api/servers") => Response::from_json(&self.snapshot()?),
             (Method::Post, "/api/servers") => self.create_server(req).await,
             _ => {
+                if let Some(id) = path.strip_prefix("/api/alerts/rules/") {
+                    return match req.method() {
+                        Method::Patch => self.update_rule(id, req).await,
+                        Method::Delete => self.delete_rule(id),
+                        _ => error::not_found(),
+                    };
+                }
                 let Some(rest) = path.strip_prefix("/api/servers/") else {
                     return error::not_found();
                 };
@@ -330,6 +366,8 @@ impl Hub {
                 closing: false,
                 latest: None,
                 parse_warn_ms: None,
+                pending: HashMap::new(),
+                pending_warn_ms: None,
             },
         )?;
         pair.server.send(&HubMessage::Welcome {
@@ -347,6 +385,7 @@ impl Hub {
                 .host_json
                 .and_then(|json| serde_json::from_str(&json).ok()),
         });
+        self.resolve_server_alerts(&id, true)?;
         self.upsert_event(&id)?;
         let alarm = self.state.storage().get_alarm().await?;
         if alarm.is_none_or(|t| t > now + 2 * ALARM_PERIOD_MS) {
@@ -362,7 +401,7 @@ impl Hub {
         pair.server.serialize_attachment(Attachment::Dash)?;
         pair.server.send(&DashboardEvent::Snapshot {
             servers: self.snapshot()?,
-            alerts: Vec::new(),
+            alerts: self.active_alerts()?,
         })?;
         Response::from_websocket(pair.client)
     }

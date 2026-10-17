@@ -55,6 +55,7 @@ node --input-type=module - "$port" "$repo_dir" "$quick" "$test_dir" <<'JS'
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 const [port, repo, quickFlag, temp] = process.argv.slice(2);
@@ -65,10 +66,12 @@ const base = `http://127.0.0.1:${port}`;
 const password = 'e2e-admin-password';
 const admin = { Authorization: `Bearer ${password}` };
 const sockets = [];
-let agent, wrangler;
+let agent, wrangler, webhook;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-const timeout = setTimeout(() => { console.error('e2e timed out'); stopChildren(); process.exit(1); }, 290_000);
+const timeout = setTimeout(() => { console.error('e2e timed out'); stopChildren(); process.exit(1); }, 360_000);
 function stopChildren() {
+  webhook?.closeAllConnections();
+  webhook?.close();
   agent?.kill('SIGCONT');
   agent?.kill('SIGTERM');
   if (wrangler) { try { process.kill(-wrangler.pid, 'SIGKILL'); } catch {} }
@@ -164,6 +167,19 @@ try {
   assert.deepEqual(config.retention, { minute_days: 7, hour_days: 90 });
   let dash = socket('/ws/dashboard', { Cookie });
   assert.deepEqual((await event(dash, 'snapshot')).alerts, []);
+  assert.deepEqual(await (await api('/api/alerts/test', 200, { method: 'POST', headers: admin })).json(),
+    { telegram: 'disabled', webhook: 'disabled' });
+  const defaultRules = await (await api('/api/alerts/rules', 200, { headers: admin })).json();
+  assert.equal(defaultRules.length, 4);
+  for (const [metric, duration] of [['offline', 60], ['cpu', 300], ['mem', 180], ['disk', 0]]) {
+    const rule = defaultRules.find(r => r.metric === metric);
+    assert.equal(rule.duration_s, duration);
+    assert.equal(rule.enabled, true);
+    assert.equal(rule.server_id, null);
+    if (metric !== 'offline') assert.equal(rule.threshold, 90);
+  }
+  const removedDefault = defaultRules.find(r => r.metric === 'disk').id;
+  await api(`/api/alerts/rules/${removedDefault}`, 204, { method: 'DELETE', headers: admin });
   const created = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { name: 'E2E VPS' } })).json();
   const { server, token } = created;
   assert.equal(server.id, 'e2e-vps');
@@ -179,6 +195,66 @@ try {
   // Deterministic history fixtures exercise aggregation/percentages independently of the host load.
   const fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
   await event(fixture, 'welcome');
+  const ruleInput = { name: 'CPU E2E', server_id: collision.server.id, metric: 'cpu', op: 'gt',
+    threshold: 0, recover_threshold: null, duration_s: 0, enabled: true };
+  const ruleUrl = '/api/alerts/rules';
+  const patchRule = (id, body) => api(`${ruleUrl}/${id}`, 200, { method: 'PATCH', headers: admin, body }).then(r => r.json());
+  for (const invalid of [{ metric: 'invalid' }, { op: 'eq' }, { threshold: 'NaN' },
+    { duration_s: -1 }, { duration_s: 86401 }, { duration_s: 0.5 }, { server_id: 'missing' }]) {
+    await api(ruleUrl, 400, { method: 'POST', headers: admin, body: { ...ruleInput, ...invalid } });
+  }
+  const rule = await (await api(ruleUrl, 201, { method: 'POST', headers: admin, body: ruleInput })).json();
+  const cpuFrame = { type: 'metrics', seq: 1, ts_ms: Date.now(), cpu_pct: 50,
+    mem_used: 1, mem_total: 10, swap_used: 0, swap_total: 0, disk_used: 4, disk_total: 8,
+    net_rx_bps: 0, net_tx_bps: 0, load1: 1, load5: 1, load15: 1, uptime_s: 1, process_count: 1 };
+  const alertEvent = (kind, id = rule.id) => event(dash, 'alert', e => e.kind === kind && e.alert.rule_id === id);
+  fixture.ws.send(JSON.stringify(cpuFrame));
+  const firing = await alertEvent('firing');
+  assert.equal(firing.alert.value, 50);
+  assert.equal(firing.alert.server_name, 'E2E VPS');
+  let active = await (await api('/api/alerts/active', 200, { headers: admin })).json();
+  assert.equal(active.find(a => a.rule_id === rule.id).value, 50);
+  assert.equal((await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === collision.server.id).alerts_firing, 1);
+  const alertDash = socket('/ws/dashboard', { Cookie });
+  const alertSnapshot = await event(alertDash, 'snapshot');
+  assert.equal(alertSnapshot.alerts.find(a => a.rule_id === rule.id).value, 50);
+  assert.equal(alertSnapshot.servers.find(s => s.id === collision.server.id).alerts_firing, 1);
+  await patchRule(rule.id, { threshold: 1000 });
+  fixture.ws.send(JSON.stringify(cpuFrame));
+  await alertEvent('resolved');
+  assert.deepEqual(await (await api('/api/alerts/active', 200, { headers: admin })).json(), []);
+  // Nullable PATCH fields distinguish omission from an explicit clear.
+  assert.equal((await patchRule(rule.id, { recover_threshold: 25 })).server_id, collision.server.id);
+  let patched = await patchRule(rule.id, { server_id: null, recover_threshold: null });
+  assert.equal(patched.server_id, null);
+  assert.equal(patched.recover_threshold, null);
+  await api(`${ruleUrl}/${rule.id}`, 400, { method: 'PATCH', headers: admin, body: { threshold: null } });
+  await api(`${ruleUrl}/${rule.id}`, 400, { method: 'PATCH', headers: admin, body: { duration_s: 86401 } });
+  await api(`${ruleUrl}/${rule.id}`, 400, { method: 'PATCH', headers: admin, body: { server_id: 'missing' } });
+  await patchRule(rule.id, { threshold: 0, server_id: collision.server.id });
+  dash.events.length = 0;
+  fixture.ws.send(JSON.stringify(cpuFrame));
+  await alertEvent('firing');
+  await patchRule(rule.id, { enabled: false });
+  await alertEvent('resolved');
+  dash.events.length = 0;
+  await patchRule(rule.id, { enabled: true });
+  fixture.ws.send(JSON.stringify(cpuFrame));
+  await alertEvent('firing');
+  await api(`${ruleUrl}/${rule.id}`, 204, { method: 'DELETE', headers: admin });
+  await alertEvent('resolved');
+  await api(`${ruleUrl}/${rule.id}`, 404, { method: 'DELETE', headers: admin });
+  await api(`${ruleUrl}/missing`, 404, { method: 'PATCH', headers: admin, body: {} });
+  const alertHistory = await (await api('/api/alerts/events?limit=2', 200, { headers: admin })).json();
+  assert.equal(alertHistory.length, 2);
+  assert.equal(alertHistory[0].rule_name, rule.name);
+  assert.equal(alertHistory[0].kind, 'resolved');
+  const olderAlerts = await (await api(`/api/alerts/events?limit=200&before_id=${alertHistory[0].id}`, 200, { headers: admin })).json();
+  assert.ok(olderAlerts.every(e => e.id < alertHistory[0].id));
+  assert.equal(olderAlerts[0].id, alertHistory[1].id);
+  await api('/api/alerts/events?limit=0', 400, { headers: admin });
+  await api('/api/alerts/events?before_id=bad', 400, { headers: admin });
+  console.log('Alerts passed: defaults, validation, nullable PATCH, firing/recovery, snapshot/counts, disable/delete and event pagination');
   const fixtureHour = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3 * 3_600_000;
   const rollup = (minute_ms, cpu_avg, rx_bytes, peak) => ({ type: 'rollup', minute_ms,
     samples: 60, cpu_avg, cpu_max: cpu_avg + 5, mem_used_avg: cpu_avg / 10,
@@ -271,6 +347,7 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
     const restartedMs = Date.now();
     dash = socket('/ws/dashboard', { Cookie });
     await event(dash, 'snapshot');
+    assert.ok(!(await (await api(ruleUrl, 200, { headers: admin })).json()).some(r => r.id === removedDefault), 'Deleted default must stay deleted after restart');
     await event(dash, 'metrics', e => e.id === server.id, 50_000);
     // Wait for the first alarm after restart to aggregate/clean the persisted fixtures.
     await pause(Math.max(0, 31_000 - (Date.now() - restartedMs)));
@@ -312,15 +389,19 @@ print('hourly aggregation, dirty hours and per-server retention passed')
 `);
     console.log(checked);
     console.log(`Restart passed: ${history.points.length} continuous native minute buckets`);
+    const offlineRule = defaultRules.find(r => r.metric === 'offline');
+    await patchRule(offlineRule.id, { duration_s: 5, server_id: server.id });
     dash.events.length = 0;
     agent.kill('SIGSTOP');
     await event(dash, 'offline', e => e.id === server.id, 46_000);
     const offline = (await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === server.id);
     assert.equal(offline.online, false);
     assert.equal(offline.metrics, null);
+    await event(dash, 'alert', e => e.kind === 'firing' && e.alert.rule_id === offlineRule.id, 5000);
     agent.kill('SIGCONT');
     await event(dash, 'online', e => e.id === server.id, 15_000);
-    console.log('SIGSTOP passed: dashboard received offline, Agent resumed and reconnected');
+    await event(dash, 'alert', e => e.kind === 'resolved' && e.alert.rule_id === offlineRule.id);
+    console.log('SIGSTOP passed: offline alert fired, Agent reconnected and alert resolved');
   }
   const agentExited = once(agent, 'exit');
   const rotated = await (await api(`/api/servers/${server.id}/token`, 200, { method: 'POST', headers: admin })).json();
@@ -349,6 +430,9 @@ print('hourly aggregation, dirty hours and per-server retention passed')
   await rejectedUpgrade(rotated.token);
   await api(`/api/servers/${collision.server.id}`, 204, { method: 'DELETE', headers: admin });
   assert.deepEqual(await (await api('/api/servers', 200, { headers: admin })).json(), []);
+  const preserved = (await (await api('/api/alerts/events?limit=200', 200, { headers: admin })).json()).find(e => e.rule_id === rule.id);
+  assert.equal(preserved.rule_name, rule.name);
+  assert.equal(preserved.server_name, 'E2E VPS');
   await api(`/api/servers/${server.id}`, 404, { method: 'DELETE', headers: admin });
   await api('/api/debug', 404, { headers: admin });
   const logout = await api('/api/auth/logout', 204, { method: 'POST', headers: { Cookie } });
@@ -361,7 +445,85 @@ print('hourly aggregation, dirty hours and per-server retention passed')
     return response.status;
   }));
   assert.ok(failures.includes(429), 'Consecutive login failures must be rate limited');
-  console.log(`e2e passed: auth, config, CRUD, token rejection/revocation, dashboard, history/rollup (${quick ? "quick; long scenarios skipped" : "full; restart and SIGSTOP"}); ${((Date.now() - e2eStartedMs) / 1000).toFixed(1)}s`);
+  // Exercise outbound delivery locally, without real credentials or external services.
+  const notices = [];
+  let webhookMode = 'ok';
+  webhook = createServer((req, res) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      notices.push(JSON.parse(body));
+      if (webhookMode === 'hang') return;
+      res.writeHead(webhookMode === 'error' ? 503 : 200);
+      res.end('ok');
+    });
+  });
+  await new Promise(resolve => webhook.listen(0, '127.0.0.1', resolve));
+  await stopWorker();
+  editStorage(`
+import pathlib, sqlite3, sys
+for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
+    db = sqlite3.connect(file)
+    if not db.execute("SELECT name FROM sqlite_master WHERE name='alert_events'").fetchone():
+        db.close(); continue
+    for column in ('rule_name', 'server_name', 'notification_json'):
+        db.execute(f"ALTER TABLE alert_events DROP COLUMN {column}")
+    db.execute("UPDATE meta SET v='1' WHERE k='schema_version'")
+    db.execute("INSERT INTO alert_events (rule_id,server_id,kind,value,ts_ms) VALUES ('legacy-rule','legacy-server','firing',1,1)")
+    db.commit(); db.close()
+`);
+  const configured = JSON.parse(fs.readFileSync(path.join(temp, 'config.json'), 'utf8'));
+  configured.vars.WEBHOOK_URL = `http://127.0.0.1:${webhook.address().port}/notify`;
+  fs.writeFileSync(path.join(temp, 'config.json'), JSON.stringify(configured));
+  await startWorker();
+  assert.ok(!(await (await api(ruleUrl, 200, { headers: admin })).json()).some(r => r.id === removedDefault));
+  const migratedEvents = await (await api('/api/alerts/events?limit=1', 200, { headers: admin })).json();
+  assert.equal(migratedEvents[0].rule_name, 'legacy-rule');
+  assert.equal(migratedEvents[0].server_name, 'legacy-server');
+  assert.deepEqual(await (await api('/api/alerts/test', 200, { method: 'POST', headers: admin })).json(),
+    { telegram: 'disabled', webhook: 'ok' });
+  assert.deepEqual(Object.keys(notices[0]).sort(), ['event', 'rule', 'server', 'ts_ms', 'value']);
+  webhookMode = 'error';
+  assert.equal((await (await api('/api/alerts/test', 200, { method: 'POST', headers: admin })).json()).webhook, 'HTTP 503');
+  webhookMode = 'hang';
+  const timeoutStarted = Date.now();
+  assert.equal((await (await api('/api/alerts/test', 200, { method: 'POST', headers: admin })).json()).webhook, 'timeout');
+  assert.ok(Date.now() - timeoutStarted >= 4800 && Date.now() - timeoutStarted < 7000);
+  const notifyServer = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { id: 'notify', name: '通知服务器' } })).json();
+  const notifyAgent = socket('/ws/agent', { Authorization: `Bearer ${notifyServer.token}` });
+  await event(notifyAgent, 'welcome');
+  const notifyDash = socket('/ws/dashboard', { Cookie });
+  await event(notifyDash, 'snapshot');
+  const notifyRules = [];
+  for (let i = 0; i < 26; i++) {
+    notifyRules.push(await (await api(ruleUrl, 201, { method: 'POST', headers: admin,
+      body: { ...ruleInput, server_id: 'notify', name: `通知规则 ${i}` } })).json());
+  }
+  const messageStarted = Date.now();
+  notifyAgent.ws.send(JSON.stringify(cpuFrame));
+  await event(notifyDash, 'alert', e => e.kind === 'firing' && e.alert.rule_id === notifyRules[25].id);
+  assert.ok(Date.now() - messageStarted < 3000, 'Slow notifications must not block Metrics handling');
+  webhookMode = 'ok';
+  // A later invocation drains the two transitions beyond the 24-transition notification batch.
+  assert.equal((await (await api('/api/alerts/active', 200, { headers: admin })).json()).length, 26);
+  const waitNotices = async (kind, count) => {
+    for (let i = 0; i < 100; i++) {
+      if (notices.filter(n => n.event === kind && n.server.id === 'notify').length === count) return;
+      await pause(50);
+    }
+    throw new Error(`Missing ${kind} webhook notifications`);
+  };
+  await waitNotices('firing', 26);
+  const delivered = notices.find(n => n.event === 'firing');
+  assert.equal(delivered.server.name, '通知服务器');
+  assert.equal(delivered.value, 50);
+  assert.ok(delivered.rule.name.startsWith('通知规则'));
+  await api('/api/servers/notify', 204, { method: 'DELETE', headers: admin });
+  await api('/api/alerts/events', 200, { headers: admin });
+  await waitNotices('resolved', 26);
+  assert.equal(new Set(notices.filter(n => n.event === 'firing').map(n => n.rule.id)).size, 26);
+  console.log('Notifications passed: disabled/test, Webhook JSON, HTTP failure, 5s timeout, nonblocking handling and 26-transition batches');
+  console.log(`e2e passed: auth, config, CRUD, token rejection/revocation, dashboard, alerts, history/rollup (${quick ? "quick; long scenarios skipped" : "full; restart and SIGSTOP"}); ${((Date.now() - e2eStartedMs) / 1000).toFixed(1)}s`);
 } finally {
   clearTimeout(timeout);
   stopChildren();

@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use worker::{Result, SqlStorage};
 
-const VERSION: &str = "1";
+const VERSION: &str = "2";
 
 #[derive(Deserialize)]
 struct Column {
@@ -30,6 +30,7 @@ pub(super) fn ready(sql: &SqlStorage) -> Result<()> {
 }
 
 pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
+    let fresh = columns(sql, "meta")?.is_empty() && columns(sql, "servers")?.is_empty();
     sql.exec(
         "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)",
         None,
@@ -43,6 +44,7 @@ pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
         .to_array::<Version>()?;
     match version.first().map(|v| v.v.as_str()) {
         Some(VERSION) => return Ok(()),
+        Some("1") => return migrate_alerts(sql, false),
         Some("0") | None => {}
         Some(_) => {
             return Err(worker::Error::RustError(
@@ -121,5 +123,36 @@ pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
       ON CONFLICT(k) DO UPDATE SET v = excluded.v",
         None,
     )?;
+    migrate_alerts(sql, fresh)
+}
+
+fn migrate_alerts(sql: &SqlStorage, fresh: bool) -> Result<()> {
+    let existing = columns(sql, "alert_events")?;
+    for (name, definition) in [
+        ("rule_name", "TEXT"),
+        ("server_name", "TEXT"),
+        ("notification_json", "TEXT"),
+    ] {
+        if !existing.iter().any(|column| column.name == name) {
+            sql.exec(
+                &format!("ALTER TABLE alert_events ADD COLUMN {name} {definition}"),
+                None,
+            )?;
+        }
+    }
+    if fresh {
+        for (id, name, metric, duration) in [
+            ("default-offline", "服务器离线", "offline", 60),
+            ("default-cpu", "CPU 使用率过高", "cpu", 300),
+            ("default-mem", "内存使用率过高", "mem", 180),
+            ("default-disk", "磁盘使用率过高", "disk", 0),
+        ] {
+            sql.exec("INSERT OR IGNORE INTO alert_rules
+                (id,name,server_id,metric,op,threshold,recover_threshold,duration_s,enabled,created_ms)
+                VALUES (?,?,NULL,?,'gt',90,NULL,?,1,?)",
+                vec![id.into(),name.into(),metric.into(),duration.into(),crate::auth::now_ms().into()])?;
+        }
+    }
+    sql.exec("UPDATE meta SET v = '2' WHERE k = 'schema_version'", None)?;
     Ok(())
 }

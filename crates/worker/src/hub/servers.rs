@@ -43,6 +43,7 @@ impl Hub {
             .filter_map(agent_conn)
             .find(|c| !c.closing);
         let traffic_month = self.traffic_month(&row.id)?;
+        let alerts_firing = self.firing_count(&row.id)?;
         Ok(ServerStatus {
             id: row.id,
             name: row.name,
@@ -55,7 +56,7 @@ impl Hub {
                 .and_then(|json| serde_json::from_str::<HostInfo>(&json).ok()),
             metrics: live.and_then(|c| c.latest),
             traffic_month,
-            alerts_firing: 0,
+            alerts_firing,
         })
     }
 
@@ -175,16 +176,7 @@ impl Hub {
         }
         self.revoke_connections(id)?;
         let sql = self.state.storage().sql();
-        sql.exec(
-            "DELETE FROM alert_state WHERE server_id = ? OR rule_id IN
-            (SELECT id FROM alert_rules WHERE server_id = ?)",
-            vec![id.into(), id.into()],
-        )?;
-        sql.exec(
-            "DELETE FROM alert_events WHERE server_id = ? OR rule_id IN
-            (SELECT id FROM alert_rules WHERE server_id = ?)",
-            vec![id.into(), id.into()],
-        )?;
+        self.resolve_server_alerts(id, false)?;
         for table in ["alert_rules", "metrics_1m", "metrics_1h", "dirty_hours"] {
             sql.exec(
                 &format!("DELETE FROM {table} WHERE server_id = ?"),
@@ -192,6 +184,7 @@ impl Hub {
             )?;
         }
         sql.exec("DELETE FROM servers WHERE id = ?", vec![id.into()])?;
+        *self.rules_cache.borrow_mut() = None;
         self.broadcast(&DashboardEvent::ServerRemoved { id: id.into() });
         Response::empty().map(|r| r.with_status(204))
     }

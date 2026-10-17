@@ -8,13 +8,13 @@
 | B1 | Codex | 协议与 DTO | — | ✅ |
 | B2 | Codex | Agent v1 | B1 | ✅ |
 | B3 | Codex | Worker：鉴权、服务器管理、配置 | B1 | ✅ |
-| B4 | Codex | Hub：数据路径、历史、流量、维护 | B3 | 🔄 |
-| B5 | Codex | 告警与通知 | B4 | ☐ |
-| B6 | Codex | CI / 部署 / 发布 / 安装脚本 / e2e | B2, B5, F1 | ☐ |
-| F1 | Claude | 前端脚手架、API 客户端、登录 | B1 | ☐ |
-| F2 | Claude | 总览 + 实时 WS | F1 | ☐ |
-| F3 | Claude | 服务器详情 + 历史图表 | F2, B4 | ☐ |
-| F4 | Claude | 设置：服务器管理 / 告警 / 通知 | F2, B5 | ☐ |
+| B4 | Codex | Hub：数据路径、历史、流量、维护 | B3 | ✅ |
+| B5 | Codex | 告警与通知 | B4 | ✅ |
+| B6 | Codex | CI / 部署 / 发布 / 安装脚本 / e2e | B2, B5, F1 | 🔄 |
+| F1 | Claude | 前端脚手架、API 客户端、登录 | B1 | ✅ |
+| F2 | Claude | 总览 + 实时 WS | F1 | ✅ |
+| F3 | Claude | 服务器详情 + 历史图表 | F2, B4 | ✅ |
+| F4 | Claude | 设置：服务器管理 / 告警 / 通知 | F2, B5 | ✅ |
 | R1 | Codex | 完整 code review | 全部 | ☐ |
 | R2 | Claude | 目标对照验收 | R1 | ☐ |
 
