@@ -142,6 +142,12 @@ pub fn origin_allowed(origin: Option<&str>, target: &str, required: bool) -> boo
     }
 }
 
+pub fn request_has_body(content_length: Option<&str>, transfer_encoding: Option<&str>) -> bool {
+    transfer_encoding.is_some()
+        || content_length
+            .is_some_and(|value| value.trim().parse::<u64>().is_ok_and(|length| length > 0))
+}
+
 pub fn json_content_type(value: Option<&str>) -> bool {
     value
         .and_then(|v| v.split(';').next())
@@ -275,6 +281,33 @@ mod tests {
         assert!(failures.limited("one", 1001, false));
         assert!(!failures.limited("two", 1001, true));
         assert!(!failures.limited("one", 61_000, true));
+    }
+
+    #[test]
+    fn request_body_detection_uses_framing_headers() {
+        for length in [
+            None,
+            Some("0"),
+            Some("00"),
+            Some(""),
+            Some("invalid"),
+            Some("-1"),
+        ] {
+            assert!(!request_has_body(length, None), "{length:?}");
+        }
+        for length in [
+            Some("1"),
+            Some("42"),
+            Some(" 42 "),
+            Some("18446744073709551615"),
+        ] {
+            assert!(request_has_body(length, None), "{length:?}");
+        }
+        for length in [None, Some("0"), Some("42")] {
+            for encoding in ["chunked", "gzip, chunked", ""] {
+                assert!(request_has_body(length, Some(encoding)));
+            }
+        }
     }
 
     #[test]

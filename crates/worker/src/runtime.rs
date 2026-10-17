@@ -103,7 +103,10 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         }
     }
     if write
-        && req.inner().body().is_some()
+        && logic::request_has_body(
+            req.headers().get("content-length")?.as_deref(),
+            req.headers().get("transfer-encoding")?.as_deref(),
+        )
         && !logic::json_content_type(req.headers().get("content-type")?.as_deref())
     {
         return error::error(415, ApiErrorCode::BadRequest, "Expected application/json");

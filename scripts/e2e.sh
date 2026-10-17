@@ -149,7 +149,8 @@ async function poll(check, label, waitMs = 60_000, intervalMs = 100) {
 }
 async function api(url, status = 200, { method = 'GET', headers = {}, body } = {}) {
   const response = await fetch(base + url, {
-    signal: AbortSignal.timeout(15_000), method, headers: { 'Content-Type': 'application/json', ...headers },
+    signal: AbortSignal.timeout(15_000), method,
+    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const failure = response.status >= 500 ? await response.clone().text() : '';
@@ -233,12 +234,33 @@ try {
   await api('/api/servers', 415, { method: 'POST', headers: { Cookie, Origin: base, 'Content-Type': 'text/plain' }, body: { name: 'CSRF' } });
   await api('/api/auth/login', 415, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: { password } });
   await api('/api/servers', 415, { method: 'POST', headers: { ...admin, 'Content-Type': 'text/plain' }, body: { name: 'CLI' } });
-  const sameOrigin = await (await api('/api/servers', 201, { method: 'POST', headers: { Cookie, Origin: base }, body: { name: 'same-origin' } })).json();
-  await api('/api/servers/' + sameOrigin.server.id, 204, { method: 'DELETE', headers: { Cookie, Origin: base } });
+  for (const framing of [{}, { 'Content-Length': '0' }]) {
+    const headers = { Cookie, Origin: base, ...framing };
+    const sameOrigin = await (await api('/api/servers', 201, { method: 'POST',
+      headers: { Cookie, Origin: base }, body: { name: 'same-origin' } })).json();
+    const rule = await (await api('/api/alerts/rules', 201, { method: 'POST',
+      headers: { Cookie, Origin: base }, body: { name: 'CSRF', server_id: sameOrigin.server.id,
+        metric: 'cpu', op: 'gt', threshold: 100, recover_threshold: null, duration_s: 0, enabled: false } })).json();
+    const writes = [
+      ['POST', `/api/servers/${sameOrigin.server.id}/token`, 200],
+      ['POST', '/api/alerts/test', 200],
+      ['DELETE', `/api/alerts/rules/${rule.id}`, 204],
+      ['DELETE', `/api/servers/${sameOrigin.server.id}`, 204],
+      ['POST', '/api/auth/logout', 204],
+    ];
+    for (const [method, url] of writes) {
+      for (const mediaType of [{}, { 'Content-Type': 'text/plain' }]) {
+        const blocked = await api(url, 403, { method,
+          headers: { ...headers, Origin: 'https://evil.example.com', ...mediaType } });
+        assert.equal((await blocked.json()).error, 'forbidden');
+      }
+    }
+    for (const [method, url, status] of writes) await api(url, status, { method, headers });
+  }
   const cliDash = socket('/ws/dashboard', admin);
   await event(cliDash, 'snapshot');
   cliDash.ws.close();
-  console.log('CSRF passed: same Origin, foreign/null/missing Origin, JSON media type and Bearer CLI');
+  console.log('CSRF passed: five bodyless Cookie writes, absent/zero Content-Length, foreign Origin with/without text/plain, JSON media type and Bearer CLI');
   const config = await (await api('/api/config', 200, { headers: admin })).json();
   assert.deepEqual(config.retention, { minute_days: 7, hour_days: 90 });
   let dash = socket('/ws/dashboard', { Cookie });
