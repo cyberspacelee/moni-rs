@@ -25,6 +25,7 @@ export type { LoginRequest } from "./LoginRequest";
 export type { MetricsFrame } from "./MetricsFrame";
 export type { MinuteRollup } from "./MinuteRollup";
 export type { Notifications } from "./Notifications";
+export type { PublicInfo } from "./PublicInfo";
 export type { Retention } from "./Retention";
 export type { ServerStatus } from "./ServerStatus";
 export type { TokenResponse } from "./TokenResponse";

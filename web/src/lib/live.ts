@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { ActiveAlert, DashboardEvent, ServerStatus } from "../api/generated";
-import { api } from "./api";
+import { api, UNAUTHORIZED_EVENT } from "./api";
 
 export type ConnState = "connecting" | "open" | "closed";
 
@@ -10,9 +10,15 @@ export type LiveState = {
   ready: boolean;
   servers: ReadonlyMap<string, ServerStatus>;
   alerts: readonly ActiveAlert[];
+  /** Recent live frames per server (client memory only) for card sparklines. */
+  recent: ReadonlyMap<string, readonly RecentPoint[]>;
 };
 
-let state: LiveState = { conn: "closed", ready: false, servers: new Map(), alerts: [] };
+export type RecentPoint = { ts: number; cpu: number; rx: number; tx: number };
+const RECENT_MAX = 90;
+
+const EMPTY: LiveState = { conn: "closed", ready: false, servers: new Map(), alerts: [], recent: new Map() };
+let state: LiveState = EMPTY;
 const listeners = new Set<() => void>();
 
 function set(next: Partial<LiveState>) {
@@ -32,7 +38,9 @@ function countFiring(servers: Map<string, ServerStatus>, alerts: readonly Active
 function apply(ev: DashboardEvent) {
   switch (ev.type) {
     case "snapshot": {
-      set({ ready: true, servers: new Map(ev.servers.map((s) => [s.id, s])), alerts: ev.alerts });
+      // Keep sparkline history across reconnects for servers that still exist.
+      const recent = new Map([...state.recent].filter(([id]) => ev.servers.some((s) => s.id === id)));
+      set({ ready: true, servers: new Map(ev.servers.map((s) => [s.id, s])), alerts: ev.alerts, recent });
       return;
     }
     case "server_upsert": {
@@ -44,7 +52,9 @@ function apply(ev: DashboardEvent) {
     case "server_removed": {
       const servers = new Map(state.servers);
       servers.delete(ev.id);
-      set({ servers, alerts: state.alerts.filter((a) => a.server_id !== ev.id) });
+      const recent = new Map(state.recent);
+      recent.delete(ev.id);
+      set({ servers, alerts: state.alerts.filter((a) => a.server_id !== ev.id), recent });
       return;
     }
     case "online":
@@ -59,6 +69,12 @@ function apply(ev: DashboardEvent) {
         servers.set(ev.id, { ...prev, online: false, metrics: null, last_seen_ms: ev.last_seen_ms });
       } else {
         servers.set(ev.id, { ...prev, online: true, metrics: ev.frame, last_seen_ms: ev.frame.ts_ms });
+        const f = ev.frame;
+        const points = [...(state.recent.get(ev.id) ?? []), { ts: f.ts_ms, cpu: f.cpu_pct, rx: f.net_rx_bps, tx: f.net_tx_bps }];
+        const recent = new Map(state.recent);
+        recent.set(ev.id, points.slice(-RECENT_MAX));
+        set({ servers, recent });
+        return;
       }
       set({ servers });
       return;
@@ -117,8 +133,8 @@ function open() {
     set({ conn: "closed" });
     if (!wanted) return;
     // A rejected handshake may mean the session expired; the API client raises the
-    // unauthorized event on 401, which sends the app back to the login screen.
-    if (!opened) void api.me().catch(() => undefined);
+    // unauthorized event on 401, which drops the app back to the public (or login) view.
+    if (!opened) void api.me().catch(() => window.dispatchEvent(new Event(UNAUTHORIZED_EVENT)));
     retryTimer = window.setTimeout(open, retryMs + Math.random() * 500);
     retryMs = Math.min(retryMs * 2, 30_000);
   };
@@ -135,7 +151,7 @@ export function disconnectLive() {
   window.clearTimeout(retryTimer);
   ws?.close();
   ws = null;
-  state = { conn: "closed", ready: false, servers: new Map(), alerts: [] };
+  state = EMPTY;
   listeners.forEach((l) => l());
 }
 

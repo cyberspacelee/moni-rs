@@ -52,6 +52,7 @@ fn export_typescript() -> Result<(), Box<dyn Error>> {
         MetricsFrame,
         MinuteRollup,
         Notifications,
+        PublicInfo,
         Retention,
         ServerStatus,
         TokenResponse,
@@ -64,6 +65,7 @@ fn export_typescript() -> Result<(), Box<dyn Error>> {
     assert!(status.contains("last_seen_ms: number | null"));
     assert!(status.contains("host: HostInfo | null"));
     assert!(status.contains("metrics: MetricsFrame | null"));
+    assert!(status.contains("country: string | null"));
     let patch = AlertRulePatch::decl(&config);
     assert!(patch.contains("server_id?: string | null"));
     assert!(patch.contains("recover_threshold?: number | null"));

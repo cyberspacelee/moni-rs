@@ -109,6 +109,8 @@ systemd 单元通过 `EnvironmentFile=/etc/moni/agent.env` 读取配置。
   `moni_session=<exp_ms>.<base64url(HMAC-SHA256(AUTH_SECRET, "session:" + exp_ms))>`，属性 `HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30d`。本地 http 开发时不加 `Secure`。
   `Authorization: Bearer <ADMIN_PASSWORD>` 视为同等权限（供 CLI / 脚本使用）。
 - **Agent token**：格式 `mn_<server_id>_<43 字符 base64url 随机串>`。Worker 解析出 server_id，计算 `token_hash = hex(HMAC-SHA256(AUTH_SECRET, token))`，通过内部 header `x-moni-server-id` 和 `x-moni-token-hash` 转发给 Hub，由 Hub 比对存储的哈希。客户端带来的这两个 header 一律先删除。
+- **公开只读**：`PUBLIC_DASHBOARD="true"` 时，未登录访客可以访问 `/ws/dashboard` 和 history，Hub 用 `public` 标签区分连接并广播脱敏事件（api.md §5.1）；Worker 通过内部 header `x-moni-admin` 告诉 Hub 连接是否为管理员，客户端带来的同名 header 一律先删除。公开 history 走 Cache API（60 秒）。
+- **地区**：Agent 握手时 Worker 读取 `request.cf.country`，经 `x-moni-country` 交给 Hub，与上线时的 `last_seen_ms` 写在同一条 UPDATE 里。
 - 登录接口限流：同一 IP 每分钟最多 10 次失败，计数保存在 Hub 内存里（丢失可以接受）。
 - 必需 Secret：`ADMIN_PASSWORD`、`AUTH_SECRET`（≥32 字节）。缺少时，`/api/*` 返回 `503 {"error":"not_configured"}`。
 
@@ -131,6 +133,7 @@ CREATE TABLE servers (
   token_hash TEXT NOT NULL,
   created_ms INTEGER NOT NULL,
   last_seen_ms INTEGER,
+  country TEXT,                   -- ISO 3166-1 alpha-2，schema v4
   host_json TEXT,
   agent_version TEXT
 );
@@ -191,7 +194,7 @@ Schema 通过 `meta.schema_version` 做顺序迁移，在构造函数中执行�
 ## 7. 前端（web/）
 
 React 19 + TypeScript + Tailwind v4 + Vite，图表用 uPlot。构建产物放在 `web/dist`，作为 Worker 的 Static Assets，`run_worker_first: ["/api/*", "/ws/*"]`。
-页面包括：登录、总览（服务器卡片）、服务器详情（实时数据 + 历史曲线 + 主机信息 + 本月流量）、设置（服务器管理 / 安装命令 / 告警规则 / 告警事件 / 通知测试）。
+页面包括：登录（仅管理需要）、总览（服务器卡片，公开可见）、服务器详情（实时数据 + 历史曲线 + 主机信息 + 本月流量）、设置（服务器管理 / 安装命令 / 告警规则 / 告警事件 / 通知测试）。
 状态：一条 dashboard WS 连接，断线后指数退避重连；重连时用 snapshot 覆盖本地状态。支持明暗主题，移动端自适应。
 
 ## 8. 部署

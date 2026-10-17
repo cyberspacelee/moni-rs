@@ -318,9 +318,18 @@ try {
     mem_used: 1, mem_total: 10, swap_used: 0, swap_total: 0, disk_used: 4, disk_total: 8,
     net_rx_bps: 0, net_tx_bps: 0, load1: 1, load5: 1, load15: 1, uptime_s: 1, process_count: 1 };
   const alertEvent = (kind, id = rule.id) => event(dash, 'alert', e => e.kind === kind && e.alert.rule_id === id);
+  const anonAlerts = socket('/ws/dashboard');
+  await event(anonAlerts, 'snapshot');
   fixture.ws.send(JSON.stringify(cpuFrame));
   const firing = await alertEvent('firing');
   assert.equal(firing.alert.value, 50);
+  // Alert state is operator configuration: public sockets receive neither events nor counts.
+  await event(anonAlerts, 'metrics', e => e.id === collision.server.id);
+  assert.ok(anonAlerts.events.every(e => e.type !== 'alert'));
+  const anonAlertSnapshot = await event(socket('/ws/dashboard'), 'snapshot');
+  assert.deepEqual(anonAlertSnapshot.alerts, []);
+  assert.equal(anonAlertSnapshot.servers.find(s => s.id === collision.server.id).alerts_firing, 0);
+  anonAlerts.ws.close();
   assert.equal(firing.alert.server_name, 'E2E VPS');
   let active = await (await api('/api/alerts/active', 200, { headers: admin })).json();
   assert.equal(active.find(a => a.rule_id === rule.id).value, 50);
@@ -424,6 +433,30 @@ try {
   assert.equal(live.online, true);
   assert.ok(live.host);
   assert.ok(live.metrics);
+  // Anonymous visitors get a redacted, read-only view; everything else stays 401.
+  assert.deepEqual(await (await api('/api/public')).json(), { enabled: true });
+  for (const url of ['/api/servers', '/api/config', '/api/alerts/rules', '/api/alerts/active', '/api/alerts/events'])
+    await api(url, 401);
+  await api(`/api/servers/${server.id}`, 401, { method: 'PATCH', headers: { Origin: base }, body: { name: 'anon' } });
+  await api(`/api/servers/${server.id}/token`, 401, { method: 'POST', headers: { Origin: base } });
+  await api(`/api/servers/${server.id}/history?range=bad`, 400);
+  const publicHistory = await api(`/api/servers/${server.id}/history?range=1h`, 200);
+  assert.match(publicHistory.headers.get('cache-control') ?? '', /public, max-age=60/);
+  assert.equal((await publicHistory.json()).range, '1h');
+  for (const headers of [{}, { 'x-moni-admin': '1' }]) {
+    const anon = socket('/ws/dashboard', headers);
+    const snapshot = await event(anon, 'snapshot');
+    assert.deepEqual(snapshot.alerts, []);
+    const visible = snapshot.servers.find(s => s.id === server.id);
+    assert.equal(visible.agent_version, null);
+    assert.equal(visible.host.hostname, '');
+    assert.equal(visible.host.kernel, '');
+    assert.ok(visible.host.os);
+    assert.ok('country' in visible);
+    await event(anon, 'metrics', e => e.id === server.id);
+    anon.ws.close();
+  }
+  console.log('Public view passed: redacted snapshot, forged admin header ignored, read-only history, admin APIs 401');
   const renamed = await (await api(`/api/servers/${server.id}`, 200, { method: 'PATCH', headers: admin, body: { name: 'Renamed' } })).json();
   assert.equal(renamed.name, 'Renamed');
   await event(dash, 'server_upsert', e => e.server.name === 'Renamed');

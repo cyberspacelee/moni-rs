@@ -17,6 +17,8 @@ pub(super) struct ServerRow {
     pub host_json: Option<String>,
     pub agent_version: Option<String>,
     pub token_hash: String,
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 fn valid_name(name: &str) -> bool {
@@ -62,6 +64,7 @@ impl Hub {
             metrics: live.and_then(|c| c.latest),
             traffic_month: traffic_month.into(),
             alerts_firing,
+            country: row.country,
         })
     }
 

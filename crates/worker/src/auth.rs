@@ -9,6 +9,10 @@ use worker::{Env, Request, Response, Result};
 pub(crate) const H_SERVER_ID: &str = "x-moni-server-id";
 #[cfg(target_arch = "wasm32")]
 pub(crate) const H_TOKEN_HASH: &str = "x-moni-token-hash";
+#[cfg(target_arch = "wasm32")]
+pub(crate) const H_COUNTRY: &str = "x-moni-country";
+#[cfg(target_arch = "wasm32")]
+pub(crate) const H_ADMIN: &str = "x-moni-admin";
 const SESSION_MS: i64 = 30 * 86_400_000;
 
 #[cfg(target_arch = "wasm32")]

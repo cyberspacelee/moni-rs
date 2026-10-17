@@ -19,7 +19,9 @@
     "REPORT_INTERVAL_S": "5",
     "RETENTION_MINUTE_DAYS": "7",
     "RETENTION_HOUR_DAYS": "90",
-    "AGENT_RELEASE_REPO": ""
+    "AGENT_RELEASE_REPO": "",
+    // 允许未登录访客只读查看总览与历史（已脱敏）；设为 "false" 则整站需要登录
+    "PUBLIC_DASHBOARD": "true"
   },
   "observability": { "enabled": true }
 }

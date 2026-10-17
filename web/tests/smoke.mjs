@@ -28,8 +28,11 @@ const step = async (label, fn) => {
 };
 
 try {
-  await step("login", async () => {
+  await step("public overview, then login", async () => {
     await page.goto(base);
+    await page.waitForSelector("text=实时", { timeout: 10_000 });
+    assert.equal(await page.getByRole("link", { name: "管理" }).count(), 0, "public view must not link to settings");
+    await page.click("text=登录");
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
     await page.waitForSelector("main");
@@ -47,7 +50,7 @@ try {
     await page.click("text=我已保存");
   });
 
-  const row = () => page.locator("tr", { hasText: name });
+  const row = () => page.locator("[data-server-row]", { hasText: name });
 
   await step("rename server (PATCH JSON)", async () => {
     await row().locator("text=重命名").click();
@@ -97,7 +100,9 @@ try {
   });
 
   await step("logout (bodyless POST)", async () => {
-    await page.click("text=退出");
+    await page.getByRole("button", { name: "退出" }).click();
+    await page.waitForSelector("a:has-text('登录')");
+    await page.goto(`${base}/#/settings/servers`);
     await page.waitForSelector('input[type="password"]');
   });
 

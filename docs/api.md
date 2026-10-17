@@ -7,7 +7,8 @@
 - JSON 字段一律 snake_case；时间戳统一为 Unix 毫秒，字段名以 `_ms` 结尾；字节数用 `u64`，速率单位为 bytes/s。
 - `u64`/`i64` 在 TS 中映射为 `number`（ts-rs 通过 `#[ts(type = "number")]` 指定）。
 - 错误响应：HTTP 4xx/5xx，响应体 `{"error": "<code>", "message": "<可读说明>"}`。错误码：`unauthorized`、`forbidden`、`not_found`、`bad_request`、`conflict`、`rate_limited`、`not_configured`、`internal`。
-- 鉴权：除 `/api/health`、`/api/auth/login` 外，所有 `/api/*` 和 `/ws/dashboard` 都需要管理员会话（Cookie `moni_session`）或 `Authorization: Bearer <ADMIN_PASSWORD>`。
+- 鉴权：除 `/api/health`、`/api/public`、`/api/auth/login` 外，所有 `/api/*` 和 `/ws/dashboard` 都需要管理员会话（Cookie `moni_session`）或 `Authorization: Bearer <ADMIN_PASSWORD>`。
+- 公开访问：Worker 变量 `PUBLIC_DASHBOARD="true"` 时，未登录访客可以只读访问 `GET /ws/dashboard` 和 `GET /api/servers/:id/history`，看到的是**脱敏视图**（见 §5.1）。其他接口仍返回 `401`。公开的 history 响应带 `Cache-Control: public, max-age=60` 并写入边缘缓存，避免访客消耗 Hub 的请求与读取额度。
 - CSRF：使用 Cookie 鉴权时，`/ws/dashboard` 握手和所有非 GET 的 `/api/*` 请求都必须带 `Origin`，并且与请求目标源完全一致（缺失、`null` 或不一致 → `403 forbidden`）；带请求体的写操作必须使用 `Content-Type: application/json`（否则返回 `415`，错误码 `bad_request`）。Bearer 鉴权（CLI）不校验 Origin。`/api/auth/login` 同样校验 Origin（存在时必须一致）。
 
 ## 1. 认证
@@ -18,6 +19,7 @@
 | POST | `/api/auth/logout` | — | `204`，清除 Cookie |
 | GET | `/api/auth/me` | — | `200 {"authenticated": true}`，或 `401` |
 | GET | `/api/health` | — | `200 "ok"`（无需鉴权） |
+| GET | `/api/public` | — | `200 {"enabled": boolean}`（无需鉴权），即 `PUBLIC_DASHBOARD` 是否开启 |
 
 ## 2. 配置
 
@@ -59,6 +61,7 @@ type ServerStatus = {
   metrics: MetricsFrame | null;     // 仅在线时非空
   traffic_month: Traffic;
   alerts_firing: number;            // 当前处于 firing 状态的告警数
+  country: string | null;           // Agent 出口 IP 所在国家（ISO 3166-1 alpha-2，来自 Cloudflare 的 request.cf.country）
 };
 ```
 
@@ -136,8 +139,18 @@ type DashboardEvent =
   | { type: "traffic"; id: string; traffic: Traffic }        // 每次写入 Rollup 后推送更新后的本月流量
   | { type: "alert"; kind: "firing" | "resolved"; alert: ActiveAlert };
 ```
+`country` 在 Agent 每次建立连接时由 Worker 读取 `request.cf.country` 并随同上线时那次写入一并更新（不额外增加写入）；`XX`（未知）和 `T1`（Tor）会被忽略，保留上一次的值。服务端从不保存 IP。
+
 `traffic`：在线服务器的本月流量由 Hub 在连接 attachment 中增量维护（连接建立或跨月时做一次 SUM 重算，之后每次写入新 Rollup 时累加），因此推送不产生额外的 SQLite 读取。
 连接建立后会立即收到一条 `snapshot`。断线重连后，同样用 snapshot 整体替换本地状态。
+
+### 5.1 公开视图（未登录）
+
+未登录连接只会收到脱敏后的事件：
+- `ServerStatus` / `online` 中的 `host.hostname`、`host.kernel` 置为空字符串，`agent_version` 置为 `null`，`alerts_firing` 置为 `0`；
+- `snapshot.alerts` 恒为 `[]`，`alert` 事件不推送（规则名称和阈值属于运维配置）；
+- 其余事件（`metrics`、`traffic`、`offline`、`server_removed`）与管理员视图相同。
+管理员会话的 Cookie 如果搭配了不一致的 `Origin`，仍返回 `403`，不会降级成公开视图。
 
 ## 6. Agent WebSocket
 

@@ -15,5 +15,11 @@ export default defineConfig({
       "/ws": { target: backend, ws: true, changeOrigin: true, headers: { origin: backend } },
     },
   },
-  build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 600 },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 600,
+    // Flags are fetched only for countries on screen; inlining would put all 270 in the bundle.
+    assetsInlineLimit: (file) => (file.includes("flag-icons") ? false : undefined),
+  },
 });

@@ -59,6 +59,9 @@ pub struct ServerStatus {
     pub metrics: Option<MetricsFrame>,
     pub traffic_month: Traffic,
     pub alerts_firing: u32,
+    /// ISO 3166-1 alpha-2 code of the Agent's egress IP, from Cloudflare's edge geolocation.
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -251,6 +254,7 @@ pub struct ActiveAlert {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum DashboardEvent {
     Snapshot {
         servers: Vec<ServerStatus>,
@@ -298,6 +302,13 @@ pub struct LoginRequest {
 #[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
 pub struct AuthMeResponse {
     pub authenticated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+pub struct PublicInfo {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

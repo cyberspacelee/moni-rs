@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use worker::{Result, SqlStorage};
 
-const VERSION: &str = "3";
+const VERSION: &str = "4";
 
 #[derive(Deserialize)]
 struct Column {
@@ -44,10 +44,15 @@ pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
         .to_array::<Version>()?;
     match version.first().map(|v| v.v.as_str()) {
         Some(VERSION) => return Ok(()),
-        Some("2") => return migrate_queues(sql),
+        Some("3") => return migrate_country(sql),
+        Some("2") => {
+            migrate_queues(sql)?;
+            return migrate_country(sql);
+        }
         Some("1") => {
             migrate_alerts(sql, false)?;
-            return migrate_queues(sql);
+            migrate_queues(sql)?;
+            return migrate_country(sql);
         }
         Some("0") | None => {}
         Some(_) => {
@@ -128,7 +133,8 @@ pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
         None,
     )?;
     migrate_alerts(sql, fresh)?;
-    migrate_queues(sql)
+    migrate_queues(sql)?;
+    migrate_country(sql)
 }
 
 fn migrate_alerts(sql: &SqlStorage, fresh: bool) -> Result<()> {
@@ -180,5 +186,13 @@ fn migrate_queues(sql: &SqlStorage) -> Result<()> {
     UPDATE meta SET v = '3' WHERE k = 'schema_version'",
         None,
     )?;
+    Ok(())
+}
+
+fn migrate_country(sql: &SqlStorage) -> Result<()> {
+    if !columns(sql, "servers")?.iter().any(|c| c.name == "country") {
+        sql.exec("ALTER TABLE servers ADD COLUMN country TEXT", None)?;
+    }
+    sql.exec("UPDATE meta SET v = '4' WHERE k = 'schema_version'", None)?;
     Ok(())
 }

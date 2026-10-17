@@ -59,7 +59,8 @@ fn server(online: bool) -> Value {
         "agent_version": if online { json!("0.1.0") } else { Value::Null },
         "host": if online { host() } else { Value::Null },
         "metrics": if online { metrics() } else { Value::Null },
-        "traffic_month": traffic(), "alerts_firing": 1
+        "traffic_month": traffic(), "alerts_firing": 1,
+        "country": if online { json!("JP") } else { Value::Null }
     })
 }
 
@@ -234,6 +235,7 @@ fn alert_dtos_match_api() {
 fn request_and_response_dtos_match_api() {
     assert_roundtrip::<LoginRequest>(json!({"password": "example-password"}));
     assert_roundtrip::<AuthMeResponse>(json!({"authenticated": true}));
+    assert_roundtrip::<PublicInfo>(json!({"enabled": true}));
     for id in [Value::Null, json!("vps-1")] {
         assert_roundtrip::<CreateServerRequest>(json!({"name": "VPS 1", "id": id}));
     }

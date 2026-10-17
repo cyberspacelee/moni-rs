@@ -17,12 +17,13 @@ use serde::{Deserialize, Serialize};
 use worker::*;
 
 use crate::{
-    auth::{self, H_SERVER_ID, H_TOKEN_HASH, now_ms},
+    auth::{self, H_ADMIN, H_COUNTRY, H_SERVER_ID, H_TOKEN_HASH, now_ms},
     error, logic, report_interval,
 };
 
 const TAG_AGENT: &str = "agent";
 const TAG_DASH: &str = "dash";
+const TAG_PUBLIC: &str = "public";
 const ALARM_PERIOD_MS: i64 = 30_000;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -289,7 +290,9 @@ impl Hub {
         match (req.method(), path.as_str()) {
             (Method::Post, "/api/auth/login") => self.login(req).await,
             (Method::Get, "/ws/agent") => self.accept_agent(req).await,
-            (Method::Get, "/ws/dashboard") => self.accept_dash(),
+            (Method::Get, "/ws/dashboard") => {
+                self.accept_dash(req.headers().get(H_ADMIN)?.is_some())
+            }
             (Method::Get, "/api/alerts/rules") => Response::from_json(&self.rules()?),
             (Method::Post, "/api/alerts/rules") => self.create_rule(req).await,
             (Method::Get, "/api/alerts/active") => Response::from_json(&self.active_alerts()?),
@@ -429,9 +432,11 @@ impl Hub {
             server_id: id.clone(),
             report_interval_s: report_interval(&self.env),
         })?;
+        // Geolocation rides along with the connect write, so it costs no extra row write.
+        let country = logic::country_code(req.headers().get(H_COUNTRY)?.as_deref());
         self.state.storage().sql().exec(
-            "UPDATE servers SET last_seen_ms = ? WHERE id = ?",
-            vec![now.into(), id.as_str().into()],
+            "UPDATE servers SET last_seen_ms = ?, country = COALESCE(?, country) WHERE id = ?",
+            vec![now.into(), country.into(), id.as_str().into()],
         )?;
         self.broadcast(&DashboardEvent::Online {
             id: id.clone(),
@@ -449,14 +454,23 @@ impl Hub {
         Response::from_websocket(pair.client)
     }
 
-    fn accept_dash(&self) -> Result<Response> {
+    fn accept_dash(&self, admin: bool) -> Result<Response> {
         let pair = WebSocketPair::new()?;
-        self.state
-            .accept_websocket_with_tags(&pair.server, &[TAG_DASH]);
+        // The tag, not instance state, records the audience so it survives hibernation.
+        let tag = if admin { TAG_DASH } else { TAG_PUBLIC };
+        self.state.accept_websocket_with_tags(&pair.server, &[tag]);
         pair.server.serialize_attachment(Attachment::Dash)?;
-        pair.server.send(&DashboardEvent::Snapshot {
-            servers: self.snapshot()?,
-            alerts: self.active_alerts()?,
+        let servers = self.snapshot()?;
+        pair.server.send(&if admin {
+            DashboardEvent::Snapshot {
+                servers,
+                alerts: self.active_alerts()?,
+            }
+        } else {
+            DashboardEvent::Snapshot {
+                servers: servers.into_iter().map(logic::redact_server).collect(),
+                alerts: Vec::new(),
+            }
         })?;
         Response::from_websocket(pair.client)
     }
@@ -491,6 +505,21 @@ impl Hub {
         };
         for ws in self.state.get_websockets_with_tag(TAG_DASH) {
             let _ = ws.send_with_str(&json);
+        }
+        let public = self.state.get_websockets_with_tag(TAG_PUBLIC);
+        if public.is_empty() {
+            return;
+        }
+        let redacted = match logic::public_view(event) {
+            logic::PublicView::Same => json,
+            logic::PublicView::Redacted(event) => match serde_json::to_string(&event) {
+                Ok(json) => json,
+                Err(_) => return,
+            },
+            logic::PublicView::Hidden => return,
+        };
+        for ws in public {
+            let _ = ws.send_with_str(&redacted);
         }
     }
 }

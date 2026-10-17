@@ -1,5 +1,7 @@
 use crate::{auth, error, logic};
-use moni_protocol::api::{ApiErrorCode, AppConfig, AuthMeResponse, Notifications, Retention};
+use moni_protocol::api::{
+    ApiErrorCode, AppConfig, AuthMeResponse, Notifications, PublicInfo, Retention,
+};
 use worker::*;
 
 #[event(start)]
@@ -34,6 +36,47 @@ fn is_upgrade(req: &Request) -> bool {
         .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
 }
 
+// Opt-in by config: a missing variable keeps the dashboard private.
+fn public_dashboard(env: &Env) -> bool {
+    env.var("PUBLIC_DASHBOARD")
+        .is_ok_and(|v| v.to_string().eq_ignore_ascii_case("true"))
+}
+
+/// Anonymous history reads are served from the edge cache so visitors cannot drain the Hub's
+/// request and row-read budget; a minute matches the rollup granularity.
+async fn public_history(req: Request, env: &Env) -> Result<Response> {
+    let url = req.url()?;
+    let range = url
+        .query_pairs()
+        .find(|(key, _)| key == "range")
+        .map(|(_, value)| value.into_owned());
+    if logic::history_plan(range.as_deref()).is_none() {
+        return error::bad_request("Unknown history range");
+    }
+    let key = format!(
+        "{}{}?range={}",
+        url.origin().ascii_serialization(),
+        url.path(),
+        range.as_deref().unwrap_or("24h")
+    );
+    let cache = Cache::default();
+    if let Some(hit) = cache.get(key.as_str(), false).await? {
+        return Ok(hit);
+    }
+    let mut upstream = to_hub(req, env).await?;
+    if upstream.status_code() != 200 {
+        return Ok(upstream);
+    }
+    let headers = Headers::new();
+    headers.set("content-type", "application/json")?;
+    headers.set("cache-control", "public, max-age=60")?;
+    let mut response = Response::from_bytes(upstream.bytes().await?)?.with_headers(headers);
+    if let Err(error) = cache.put(key.as_str(), response.cloned()?).await {
+        console_warn!("Public history cache write failed: {}", error);
+    }
+    Ok(response)
+}
+
 fn config(env: &Env) -> AppConfig {
     AppConfig {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -62,6 +105,11 @@ async fn route(req: Request, env: Env) -> Result<Response> {
     if path == "/api/health" && req.method() == Method::Get {
         return Response::from_json(&"ok");
     }
+    if path == "/api/public" && req.method() == Method::Get {
+        return Response::from_json(&PublicInfo {
+            enabled: public_dashboard(&env),
+        });
+    }
     let Some(secrets) = auth::Secrets::load(&env) else {
         return error::error(
             503,
@@ -69,9 +117,16 @@ async fn route(req: Request, env: Env) -> Result<Response> {
             "ADMIN_PASSWORD and AUTH_SECRET (at least 32 bytes) are required",
         );
     };
+    let country = logic::country_code(req.cf().and_then(|cf| cf.country()).as_deref());
     let mut req = req.clone_mut()?;
-    req.headers_mut()?.delete(auth::H_SERVER_ID)?;
-    req.headers_mut()?.delete(auth::H_TOKEN_HASH)?;
+    for internal in [
+        auth::H_SERVER_ID,
+        auth::H_TOKEN_HASH,
+        auth::H_COUNTRY,
+        auth::H_ADMIN,
+    ] {
+        req.headers_mut()?.delete(internal)?;
+    }
     if path == "/ws/agent" && req.method() == Method::Get {
         let Some(token) = auth::bearer(&req) else {
             return error::unauthorized();
@@ -85,13 +140,26 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         req.headers_mut()?.set(auth::H_SERVER_ID, id)?;
         req.headers_mut()?
             .set(auth::H_TOKEN_HASH, &auth::token_hash(&secrets.key, &token)?)?;
+        if let Some(country) = country {
+            req.headers_mut()?.set(auth::H_COUNTRY, &country)?;
+        }
         // The Hub needs only the keyed hash, never the original credential.
         req.headers_mut()?.delete("authorization")?;
         return to_hub(req, &env).await;
     }
     let login = path == "/api/auth/login" && req.method() == Method::Post;
     let bearer_admin = auth::bearer(&req).is_some_and(|v| auth::secret_eq(&v, &secrets.password));
-    if !login && !auth::is_admin(&req, &secrets) {
+    let admin = auth::is_admin(&req, &secrets);
+    if !login && !admin {
+        if public_dashboard(&env) && logic::public_route(req.method() == Method::Get, &path) {
+            if path == "/ws/dashboard" {
+                if !is_upgrade(&req) {
+                    return error::bad_request("Expected WebSocket upgrade");
+                }
+                return to_hub(req, &env).await;
+            }
+            return public_history(req, &env).await;
+        }
         return error::unauthorized();
     }
     let write = req.method() != Method::Get && path.starts_with("/api/");
@@ -122,6 +190,10 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         (Method::Get, "/api/config") => Response::from_json(&config(&env)),
         (Method::Get, "/ws/dashboard") if !is_upgrade(&req) => {
             error::bad_request("Expected WebSocket upgrade")
+        }
+        (Method::Get, "/ws/dashboard") => {
+            req.headers_mut()?.set(auth::H_ADMIN, "1")?;
+            to_hub(req, &env).await
         }
         _ => to_hub(req, &env).await,
     }

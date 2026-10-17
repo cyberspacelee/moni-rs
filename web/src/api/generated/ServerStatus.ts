@@ -3,4 +3,8 @@ import type { HostInfo } from "./HostInfo";
 import type { MetricsFrame } from "./MetricsFrame";
 import type { Traffic } from "./Traffic";
 
-export type ServerStatus = { id: string, name: string, created_ms: number, online: boolean, last_seen_ms: number | null, agent_version: string | null, host: HostInfo | null, metrics: MetricsFrame | null, traffic_month: Traffic, alerts_firing: number, };
+export type ServerStatus = { id: string, name: string, created_ms: number, online: boolean, last_seen_ms: number | null, agent_version: string | null, host: HostInfo | null, metrics: MetricsFrame | null, traffic_month: Traffic, alerts_firing: number, 
+/**
+ * ISO 3166-1 alpha-2 code of the Agent's egress IP, from Cloudflare's edge geolocation.
+ */
+country: string | null, };

@@ -1,5 +1,6 @@
 //! Runtime-independent query plans and time rules shared by the Hub and native tests.
-use moni_protocol::api::HistoryRange;
+use moni_protocol::HostInfo;
+use moni_protocol::api::{DashboardEvent, HistoryRange, ServerStatus};
 
 pub const MINUTE_MS: i64 = 60_000;
 pub const HOUR_MS: i64 = 60 * MINUTE_MS;
@@ -165,6 +166,75 @@ pub fn valid_rollup(r: &moni_protocol::MinuteRollup) -> bool {
         && r.swap_used_avg <= r.swap_total
         && r.disk_used <= r.disk_total
         && r.load1_avg.is_finite()
+}
+
+/// Cloudflare reports `XX` for unknown and `T1` for Tor; neither names a place.
+pub fn country_code(value: Option<&str>) -> Option<String> {
+    value
+        .filter(|v| v.len() == 2 && v.bytes().all(|b| b.is_ascii_uppercase()))
+        .filter(|v| *v != "XX" && *v != "T1")
+        .map(str::to_owned)
+}
+
+/// Requests anonymous visitors may make when the public dashboard is enabled.
+pub fn public_route(get: bool, path: &str) -> bool {
+    get && (path == "/ws/dashboard"
+        || path
+            .strip_prefix("/api/servers/")
+            .and_then(|rest| rest.strip_suffix("/history"))
+            .is_some_and(crate::auth::valid_id))
+}
+
+/// Strips what helps an attacker more than a visitor: exact host identity, kernel and Agent
+/// versions, and alert state (rule names and thresholds are operator configuration).
+pub fn redact_server(mut server: ServerStatus) -> ServerStatus {
+    if let Some(host) = server.host.as_mut() {
+        redact_host(host);
+    }
+    server.agent_version = None;
+    server.alerts_firing = 0;
+    server
+}
+
+fn redact_host(host: &mut HostInfo) {
+    host.hostname.clear();
+    host.kernel.clear();
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum PublicView {
+    Same,
+    Redacted(DashboardEvent),
+    Hidden,
+}
+
+pub fn public_view(event: &DashboardEvent) -> PublicView {
+    match event {
+        DashboardEvent::Snapshot { servers, .. } => {
+            PublicView::Redacted(DashboardEvent::Snapshot {
+                servers: servers.iter().cloned().map(redact_server).collect(),
+                alerts: Vec::new(),
+            })
+        }
+        DashboardEvent::ServerUpsert { server } => {
+            PublicView::Redacted(DashboardEvent::ServerUpsert {
+                server: redact_server(server.clone()),
+            })
+        }
+        DashboardEvent::Online { id, host, .. } => PublicView::Redacted(DashboardEvent::Online {
+            id: id.clone(),
+            agent_version: None,
+            host: host.clone().map(|mut host| {
+                redact_host(&mut host);
+                host
+            }),
+        }),
+        DashboardEvent::Alert { .. } => PublicView::Hidden,
+        DashboardEvent::ServerRemoved { .. }
+        | DashboardEvent::Offline { .. }
+        | DashboardEvent::Metrics { .. }
+        | DashboardEvent::Traffic { .. } => PublicView::Same,
+    }
 }
 
 #[cfg(test)]
@@ -374,5 +444,126 @@ mod tests {
         ] {
             assert!(!valid_rollup(&bad));
         }
+    }
+
+    #[test]
+    fn country_codes_accept_only_real_iso_codes() {
+        assert_eq!(country_code(Some("JP")).as_deref(), Some("JP"));
+        for bad in [
+            None,
+            Some(""),
+            Some("XX"),
+            Some("T1"),
+            Some("jp"),
+            Some("JPN"),
+            Some("日本"),
+        ] {
+            assert_eq!(country_code(bad), None);
+        }
+    }
+
+    #[test]
+    fn public_routes_are_read_only_dashboard_and_history() {
+        assert!(public_route(true, "/ws/dashboard"));
+        assert!(public_route(true, "/api/servers/vps-1/history"));
+        for (get, path) in [
+            (false, "/ws/dashboard"),
+            (false, "/api/servers/vps-1/history"),
+            (true, "/api/servers"),
+            (true, "/api/servers/vps-1"),
+            (true, "/api/servers/vps-1/token"),
+            (true, "/api/servers/VPS/history"),
+            (true, "/api/servers//history"),
+            (true, "/api/servers/a/b/history"),
+            (true, "/api/alerts/rules"),
+            (true, "/api/alerts/events"),
+            (true, "/api/config"),
+        ] {
+            assert!(!public_route(get, path), "{path}");
+        }
+    }
+
+    #[test]
+    fn public_view_hides_identity_versions_and_alerts() {
+        let host = HostInfo {
+            hostname: "db-primary.internal".into(),
+            os: "Debian 13".into(),
+            kernel: "6.12.0-1-amd64".into(),
+            arch: "x86_64".into(),
+            cpu_model: "EPYC".into(),
+            cpu_cores: 2,
+            boot_time_ms: 1,
+        };
+        let server = ServerStatus {
+            id: "vps-1".into(),
+            name: "VPS 1".into(),
+            created_ms: 0,
+            online: true,
+            last_seen_ms: Some(1),
+            agent_version: Some("0.1.0".into()),
+            host: Some(host.clone()),
+            metrics: None,
+            traffic_month: moni_protocol::api::Traffic {
+                rx_bytes: 1,
+                tx_bytes: 2,
+                since_ms: 0,
+            },
+            alerts_firing: 2,
+            country: Some("JP".into()),
+        };
+        let PublicView::Redacted(DashboardEvent::Snapshot { servers, alerts }) =
+            public_view(&DashboardEvent::Snapshot {
+                servers: vec![server.clone()],
+                alerts: Vec::new(),
+            })
+        else {
+            panic!("snapshot must be redacted");
+        };
+        assert!(alerts.is_empty());
+        let public = &servers[0];
+        let json = serde_json::to_string(public).unwrap_or_default();
+        for secret in ["db-primary", "6.12.0", "0.1.0"] {
+            assert!(!json.contains(secret), "{secret} leaked");
+        }
+        assert_eq!(public.alerts_firing, 0);
+        assert_eq!(public.country.as_deref(), Some("JP"));
+        assert_eq!(
+            public.host.as_ref().map(|h| h.os.as_str()),
+            Some("Debian 13")
+        );
+        let PublicView::Redacted(DashboardEvent::Online {
+            agent_version,
+            host,
+            ..
+        }) = public_view(&DashboardEvent::Online {
+            id: "vps-1".into(),
+            agent_version: Some("0.1.0".into()),
+            host: Some(host),
+        })
+        else {
+            panic!("online must be redacted");
+        };
+        assert_eq!(agent_version, None);
+        assert_eq!(host.map(|h| h.hostname), Some(String::new()));
+        assert!(matches!(
+            public_view(&DashboardEvent::ServerUpsert { server }),
+            PublicView::Redacted(DashboardEvent::ServerUpsert { server }) if server.agent_version.is_none()
+        ));
+        let alert = moni_protocol::api::ActiveAlert {
+            rule_id: "r".into(),
+            rule_name: "secret rule".into(),
+            server_id: "vps-1".into(),
+            server_name: "VPS 1".into(),
+            metric: moni_protocol::api::AlertMetric::Cpu,
+            value: None,
+            since_ms: 0,
+        };
+        assert!(matches!(
+            public_view(&DashboardEvent::Alert {
+                kind: moni_protocol::api::AlertKind::Firing,
+                alert
+            }),
+            PublicView::Hidden
+        ));
     }
 }

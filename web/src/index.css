@@ -3,20 +3,100 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme {
+/*
+ * Design tokens. Surfaces are a warm paper / graphite pair; the brand hue is a single violet
+ * that never doubles as a status colour (green / amber / red stay reserved for state).
+ */
+:root {
+  --bg: #f5f5f3;
+  --surface: #ffffff;
+  --surface-2: #f1f0ed;
+  --line: #e7e6e2;
+  --line-strong: #d5d4ce;
+  --ink: #141413;
+  --ink-2: #52514e;
+  --ink-3: #85847f;
+  --brand: #6250d6;
+  --brand-strong: #5141c2;
+  --brand-soft: #efecfd;
+  --brand-ink: #4a3aa7;
+  --glow: rgb(98 80 214 / 0.1);
+
+  /* Chart roles — validated with the dataviz palette validator (light surface). */
+  --series-1: #6250d6;
+  --series-2: #eb6834;
+  --chart-grid: #ecebe7;
+  --chart-axis: #85847f;
+  --status-good: #0ca30c;
+  --status-warning: #e09a00;
+  --status-critical: #d03b3b;
+  --status-good-soft: #e7f6e7;
+  --status-critical-soft: #fbeaea;
+}
+:root.dark {
+  --bg: #0c0c0e;
+  --surface: #141417;
+  --surface-2: #1c1c20;
+  --line: #25252a;
+  --line-strong: #34343b;
+  --ink: #f0efec;
+  --ink-2: #b6b5af;
+  --ink-3: #7f7e79;
+  --brand: #9085e9;
+  --brand-strong: #a79ef0;
+  --brand-soft: rgb(144 133 233 / 0.14);
+  --brand-ink: #c4bdf7;
+  --glow: rgb(144 133 233 / 0.12);
+
+  /* Dark steps of the same hues, validated against the dark surface. */
+  --series-1: #9085e9;
+  --series-2: #d95926;
+  --chart-grid: #222227;
+  --chart-axis: #7f7e79;
+  --status-good: #2fb344;
+  --status-warning: #f0ad1f;
+  --status-critical: #e66767;
+  --status-good-soft: rgb(47 179 68 / 0.14);
+  --status-critical-soft: rgb(230 103 103 / 0.14);
+}
+
+@theme inline {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-good: var(--status-good);
+  --color-warn: var(--status-warning);
+  --color-crit: var(--status-critical);
+  --color-good-soft: var(--status-good-soft);
+  --color-crit-soft: var(--status-critical-soft);
 }
 
 @layer base {
   html {
-    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+    @apply bg-bg text-ink antialiased;
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     @apply min-h-dvh;
+    /* A faint brand glow behind the header gives the page a light source without decoration. */
+    background: radial-gradient(60rem 22rem at 50% -10rem, var(--glow), transparent 70%) no-repeat;
   }
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-emerald-500;
+    @apply outline-2 outline-offset-2 outline-brand;
+  }
+  ::selection {
+    background: var(--brand-soft);
   }
 }
 
@@ -24,56 +104,33 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* uPlot legend/axes inherit theme colours */
-.uplot,
-.u-legend {
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+.pulse-ring {
+  animation: pulse-ring 2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-ring {
+    animation: none;
+  }
+}
+
+.uplot {
   font-family: var(--font-sans);
   color: inherit;
-}
-
-/* Chart roles — validated with the dataviz palette validator against white / zinc-900 surfaces. */
-:root {
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --chart-grid: #e4e4e7;
-  --chart-axis: #71717a;
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-critical: #d03b3b;
-}
-:root.dark {
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --chart-grid: #27272a;
-  --chart-axis: #a1a1aa;
-}
-
-/* Compact, quiet uPlot legend: values in text ink, the colour swatch carries identity. */
-.u-legend {
-  font-size: 12px;
-  margin-top: 4px;
-}
-.u-legend .u-label {
-  font-weight: 400;
-  color: var(--chart-axis);
-}
-.u-legend .u-value {
-  font-variant-numeric: tabular-nums;
-}
-/* uPlot paints the marker border in the series colour; show it as a short line swatch. */
-.u-legend .u-marker {
-  width: 12px;
-  height: 6px;
-  border-width: 0 0 3px 0 !important;
-  border-radius: 0;
-  background: transparent !important;
-}
-.u-legend th {
-  font-weight: 400;
-}
-.u-legend .u-series:first-child .u-value {
-  color: var(--chart-axis);
-}
-.u-legend .u-series:first-child .u-marker {
-  display: none;
 }

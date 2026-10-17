@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 // Hash routing keeps static asset serving trivial (no SPA fallback needed).
 export type Route =
   | { page: "overview" }
+  | { page: "login" }
   | { page: "server"; id: string }
   | { page: "settings"; tab: SettingsTab };
 
@@ -20,6 +21,7 @@ function decode(part: string): string | null {
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decode);
   if (parts.some((p) => p == null)) return { page: "overview" };
+  if (parts[0] === "login") return { page: "login" };
   if (parts[0] === "server" && parts[1]) return { page: "server", id: parts[1] };
   if (parts[0] === "settings") {
     const tab = TABS.find((t) => t === parts[1]) ?? "servers";
@@ -32,6 +34,8 @@ export function href(route: Route): string {
   switch (route.page) {
     case "overview":
       return "#/";
+    case "login":
+      return "#/login";
     case "server":
       return `#/server/${encodeURIComponent(route.id)}`;
     case "settings":

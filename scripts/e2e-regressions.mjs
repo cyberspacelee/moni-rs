@@ -52,14 +52,15 @@ export async function regressions({ api, admin, socket, event, poll, base, patch
   assert.equal(measured.rowsWritten, 0);
   console.log(`RowsRead passed: E=100, A_other=10 -> ${otherRows} (empty baseline ${baseline}); A_current=10 -> ${measured.rowsRead}, no writes; queries=${JSON.stringify(measured.queries)}`);
   // Reconstruct the deployed v2 layout, then exercise its real constructor migration with data.
-  await sql("ALTER TABLE alert_state RENAME TO saved_state; CREATE TABLE alert_state(rule_id TEXT,server_id TEXT,since_ms INTEGER,value REAL,PRIMARY KEY(rule_id,server_id)) WITHOUT ROWID; INSERT INTO alert_state SELECT rule_id,server_id,since_ms,value FROM saved_state; DROP TABLE saved_state; ALTER TABLE alert_events ADD COLUMN notification_json TEXT");
+  await sql("ALTER TABLE alert_state RENAME TO saved_state; CREATE TABLE alert_state(rule_id TEXT,server_id TEXT,since_ms INTEGER,value REAL,PRIMARY KEY(rule_id,server_id)) WITHOUT ROWID; INSERT INTO alert_state SELECT rule_id,server_id,since_ms,value FROM saved_state; DROP TABLE saved_state; ALTER TABLE alert_events ADD COLUMN notification_json TEXT; ALTER TABLE servers DROP COLUMN country");
   const migratedNotice = JSON.stringify({ event: 'firing', rule: { id: 'fixture' },
     server: { id: 'regression' }, value: 50, ts_ms: now });
   await sql("UPDATE alert_events SET notification_json=? WHERE id=(SELECT max(id) FROM alert_events)", [migratedNotice]);
   await sql("UPDATE meta SET v='2' WHERE k='schema_version'");
   await test('recreate');
   assert.equal((await sql("SELECT count(*) AS n FROM alert_state WHERE server_id='regression'"))[0].n, 10);
-  assert.equal((await sql("SELECT v FROM meta WHERE k='schema_version'"))[0].v, '3');
+  assert.equal((await sql("SELECT v FROM meta WHERE k='schema_version'"))[0].v, '4');
+  assert.ok((await sql('PRAGMA table_info(servers)')).some(c => c.name === 'country'));
   assert.equal((await sql('PRAGMA table_info(alert_state)')).find(c => c.pk === 1).name, 'server_id');
   assert.equal((await sql('SELECT count(*) AS n FROM notification_queue'))[0].n, 1);
   await metrics();

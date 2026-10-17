@@ -9,6 +9,7 @@ import type {
   CreateServerResponse,
   History,
   HistoryRange,
+  PublicInfo,
   ServerStatus,
   TokenResponse,
 } from "../api/generated";
@@ -23,7 +24,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Fired when any request comes back 401 so the app can drop back to the login screen. */
+/** Fired when any request comes back 401 so the app can drop back to the public or login view. */
 export const UNAUTHORIZED_EVENT = "moni:unauthorized";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -43,7 +44,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     } catch {
       // non-JSON error body
     }
-    if (res.status === 401 && path !== "/api/auth/login") window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    // Login and the session probe report 401 to their caller instead of resetting the app.
+    if (res.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/me")
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     throw new ApiError(res.status, code, message);
   }
   if (res.status === 204) return undefined as T;
@@ -55,6 +58,7 @@ export const api = {
   login: (password: string) => request<void>("POST", "/api/auth/login", { password }),
   logout: () => request<void>("POST", "/api/auth/logout"),
   me: () => request<{ authenticated: boolean }>("GET", "/api/auth/me"),
+  publicInfo: () => request<PublicInfo>("GET", "/api/public"),
   config: () => request<AppConfig>("GET", "/api/config"),
 
   servers: () => request<ServerStatus[]>("GET", "/api/servers"),

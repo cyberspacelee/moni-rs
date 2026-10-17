@@ -10,7 +10,7 @@
 - **Agent**：Rust 静态二进制（amd64 / arm64，musl），内存约 4 MB。每 5 秒上报一次实时数据，每分钟上报一条聚合数据；断线后会自动补发。
 - **后端**：Rust 编译为 WebAssembly，运行在 Cloudflare Workers 和一个单例 Durable Object（内置 SQLite）上。Agent 和看板都通过可休眠的 WebSocket 连接。
 - **前端**：React + TypeScript + Tailwind CSS，作为 Workers 静态资源托管（静态请求免费）。
-- **功能**：实时看板；1 小时到 90 天的历史曲线；本月流量；阈值告警和离线告警（Telegram / Webhook）；每台服务器使用独立 token。
+- **功能**：实时看板；1 小时到 90 天的历史曲线；本月流量；按出口 IP 自动识别服务器所在国家/地区；阈值告警和离线告警（Telegram / Webhook）；每台服务器使用独立 token；总览与详情可公开只读访问，管理需要登录。
 
 免费额度下大约可以监控 **30 台**服务器。瓶颈是 SQLite 每天的写入行数，详见 [docs/design.md](docs/design.md) §5.4。
 
@@ -158,6 +158,8 @@ npm run deploy -- --var AGENT_RELEASE_REPO:<owner>/moni-rs
 ## 常见问题
 
 **国内大陆打不开看板？** `*.workers.dev` 在大陆无法直接访问。在 Worker 的 **Settings → Domains & Routes** 中绑定一个托管在 Cloudflare 的自定义域名，安装命令中的 `--server` 也要改用这个域名。
+
+**看板可以公开给别人看吗？会泄露什么？** 默认开启（`wrangler.jsonc` 中 `PUBLIC_DASHBOARD = "true"`）：未登录访客只能看总览、详情和历史曲线；主机名、内核版本、Agent 版本、告警规则与事件、token、IP 都不会下发。想让整站都需要登录，把它改成 `"false"` 后重新部署即可。
 
 **首次 Deploy 报错，提示需要注册 workers.dev 子域？** 到 Cloudflare 控制台的 Workers & Pages 页面完成子域注册后，重新运行即可。
 

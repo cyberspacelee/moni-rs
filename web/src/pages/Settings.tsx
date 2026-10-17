@@ -9,6 +9,20 @@ import type {
   AppConfig,
   ServerStatus,
 } from "../api/generated";
+import { Flag } from "../components/Flag";
+import {
+  IconAlert,
+  IconBell,
+  IconCheck,
+  IconHistory,
+  IconKey,
+  IconPencil,
+  IconPlus,
+  IconPower,
+  IconSend,
+  IconServer,
+  IconTrash,
+} from "../components/icons";
 import {
   Badge,
   Button,
@@ -30,28 +44,29 @@ import { useLive } from "../lib/live";
 import { href, type SettingsTab } from "../lib/router";
 import { useNow } from "../lib/useNow";
 
-const TABS: { id: SettingsTab; label: string }[] = [
-  { id: "servers", label: "服务器" },
-  { id: "alerts", label: "告警规则" },
-  { id: "events", label: "告警事件" },
-  { id: "notify", label: "通知" },
+const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
+  { id: "servers", label: "服务器", icon: <IconServer size={15} /> },
+  { id: "alerts", label: "告警规则", icon: <IconBell size={15} /> },
+  { id: "events", label: "告警事件", icon: <IconHistory size={15} /> },
+  { id: "notify", label: "通知", icon: <IconSend size={15} /> },
 ];
 
 export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig | null }) {
   return (
-    <div className="space-y-6">
-      <nav className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="space-y-5 sm:space-y-6">
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">管理</h1>
+      <nav className="no-scrollbar -mx-4 flex gap-1 overflow-x-auto border-b border-line px-4 sm:mx-0 sm:px-0">
         {TABS.map((t) => (
           <a
             key={t.id}
             href={href({ page: "settings", tab: t.id })}
+            aria-current={tab === t.id ? "page" : undefined}
             className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm",
-              tab === t.id
-                ? "border-zinc-900 font-medium dark:border-zinc-100"
-                : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100",
+              "-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm transition-colors",
+              tab === t.id ? "border-brand font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink",
             )}
           >
+            {t.icon}
             {t.label}
           </a>
         ))}
@@ -60,6 +75,15 @@ export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig 
       {tab === "alerts" && <AlertsTab />}
       {tab === "events" && <EventsTab />}
       {tab === "notify" && <NotifyTab config={config} />}
+    </div>
+  );
+}
+
+function Toolbar({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-ink-3">{text}</p>
+      {children}
     </div>
   );
 }
@@ -82,22 +106,25 @@ function TokenReveal({ config, token }: { config: AppConfig | null; token: strin
   const cmd = installCommand(config, token);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-amber-700 dark:text-amber-400">Token 只显示这一次，请立即保存。</p>
+      <p className="flex items-center gap-2 rounded-xl bg-[color-mix(in_oklab,var(--status-warning)_14%,transparent)] px-3 py-2 text-sm text-ink">
+        <IconAlert size={15} className="shrink-0 text-warn" />
+        Token 只显示这一次，请立即保存。
+      </p>
       <Field label="Token">
         <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded bg-zinc-100 px-2 py-1.5 font-mono text-xs dark:bg-zinc-800">{token}</code>
+          <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-2.5 py-2 font-mono text-xs">{token}</code>
           <CopyButton text={token} />
         </div>
       </Field>
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">安装命令（在 VPS 上以 root 运行）</span>
+          <span className="text-xs font-medium text-ink-2">安装命令（在 VPS 上以 root 运行）</span>
           <CopyButton text={cmd} />
         </div>
-        <pre className="overflow-x-auto rounded bg-zinc-100 p-3 font-mono text-xs leading-relaxed dark:bg-zinc-800">{cmd}</pre>
+        <pre className="overflow-x-auto rounded-xl bg-[#121214] p-3.5 font-mono text-xs leading-relaxed text-[#e9e8e4]">{cmd}</pre>
       </div>
       {!config?.agent_release_repo && (
-        <p className="text-xs text-zinc-500">未配置 AGENT_RELEASE_REPO，请把命令中的 &lt;owner&gt; 替换为你的 GitHub 仓库。</p>
+        <p className="text-xs text-ink-3">未配置 AGENT_RELEASE_REPO，请把命令中的 &lt;owner&gt; 替换为你的 GitHub 仓库。</p>
       )}
     </div>
   );
@@ -170,60 +197,53 @@ function ServersTab({ config }: { config: AppConfig | null }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-500">每台服务器使用独立 token；轮换或删除会立即断开对应 Agent。</p>
+      <Toolbar text="每台服务器使用独立 token；轮换或删除会立即断开对应 Agent。">
         <Button variant="primary" onClick={() => (setError(""), setAdding(true))}>
+          <IconPlus size={15} />
           添加服务器
         </Button>
-      </div>
+      </Toolbar>
 
       {!ready ? (
         <Spinner />
       ) : list.length === 0 ? (
-        <EmptyState title="还没有服务器" />
+        <EmptyState title="还没有服务器" icon={<IconServer size={18} />} />
       ) : (
-        <Card className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs text-zinc-500">
-              <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                <th className="px-4 py-2 font-medium">名称</th>
-                <th className="px-4 py-2 font-medium">ID</th>
-                <th className="px-4 py-2 font-medium">状态</th>
-                <th className="px-4 py-2 font-medium">Agent</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((s) => (
-                <tr key={s.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
-                  <td className="px-4 py-2.5">
-                    <a href={href({ page: "server", id: s.id })} className="font-medium hover:underline">
-                      {s.name}
-                    </a>
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-zinc-500">{s.id}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <StatusDot online={s.online} />
-                    {!s.online && <span className="ml-2 text-xs text-zinc-500">{s.last_seen_ms ? ago(s.last_seen_ms, now) : "未连接过"}</span>}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-500">{s.agent_version ?? "–"}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => (setError(""), setEditName(s.name), setEditing(s))}>
-                        重命名
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => void rotate(s)}>
-                        轮换 Token
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-red-600 dark:text-red-400" onClick={() => void remove(s)}>
-                        删除
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Card className="divide-y divide-line">
+          {list.map((s) => (
+            <div key={s.id} data-server-row className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <Flag code={s.country} className="text-base" />
+                <div className="min-w-0 flex-1">
+                  <a href={href({ page: "server", id: s.id })} className="block truncate font-medium hover:text-brand">
+                    {s.name}
+                  </a>
+                  <div className="flex flex-wrap items-center gap-x-2 text-xs text-ink-3">
+                    <span className="font-mono">{s.id}</span>
+                    {s.agent_version && <span>· v{s.agent_version}</span>}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <StatusDot online={s.online} />
+                  {!s.online && <div className="text-[11px] text-ink-3">{s.last_seen_ms ? ago(s.last_seen_ms, now) : "未连接过"}</div>}
+                </div>
+              </div>
+              <div className="-mx-1.5 flex gap-1 sm:mx-0">
+                <Button size="sm" variant="ghost" onClick={() => (setError(""), setEditName(s.name), setEditing(s))}>
+                  <IconPencil size={14} />
+                  重命名
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void rotate(s)}>
+                  <IconKey size={14} />
+                  轮换 Token
+                </Button>
+                <Button size="sm" variant="danger" className="ml-auto sm:ml-0" onClick={() => void remove(s)}>
+                  <IconTrash size={14} />
+                  删除
+                </Button>
+              </div>
+            </div>
+          ))}
         </Card>
       )}
 
@@ -236,7 +256,7 @@ function ServersTab({ config }: { config: AppConfig | null }) {
             <Input value={customId} onChange={(e) => setCustomId(e.target.value)} placeholder="hk-01" />
           </Field>
           <ErrorText>{error}</ErrorText>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 pt-1">
             <Button type="button" onClick={() => setAdding(false)}>
               取消
             </Button>
@@ -262,7 +282,7 @@ function ServersTab({ config }: { config: AppConfig | null }) {
             <Input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} />
           </Field>
           <ErrorText>{error}</ErrorText>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 pt-1">
             <Button type="button" onClick={() => setEditing(null)}>
               取消
             </Button>
@@ -368,7 +388,7 @@ function RuleForm({
         </Field>
       </div>
       {!offline && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Field label="条件">
             <Select value={r.op} onChange={(e) => setR({ ...r, op: e.target.value as AlertOp })}>
               <option value="gt">大于</option>
@@ -405,11 +425,11 @@ function RuleForm({
         />
       </Field>
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} />
+        <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} />
         启用
       </label>
       <ErrorText>{error}</ErrorText>
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 pt-1">
         <Button type="button" onClick={onCancel}>
           取消
         </Button>
@@ -465,38 +485,52 @@ function AlertsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-500">规则对实时数据求值，状态变化时发送通知。</p>
+      <Toolbar text="规则对实时数据求值，状态变化时发送通知。">
         <Button variant="primary" onClick={() => setEditing("new")}>
+          <IconPlus size={15} />
           添加规则
         </Button>
-      </div>
+      </Toolbar>
       <ErrorText>{error}</ErrorText>
       {rules == null ? (
         !error && <Spinner />
       ) : rules.length === 0 ? (
-        <EmptyState title="没有告警规则" />
+        <EmptyState title="没有告警规则" icon={<IconBell size={18} />} />
       ) : (
-        <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <Card className="divide-y divide-line">
           {rules.map((r) => (
-            <div key={r.id} data-rule-row className="flex flex-wrap items-center gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  {r.name}
-                  {!r.enabled && <Badge>已停用</Badge>}
-                </div>
-                <div className="text-xs text-zinc-500">
-                  {describeRule(r)} · {serverName(r.server_id)}
+            <div key={r.id} data-rule-row className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <span
+                  aria-hidden
+                  className={cx(
+                    "mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg",
+                    r.enabled ? "bg-brand-soft text-brand-ink" : "bg-surface-2 text-ink-3",
+                  )}
+                >
+                  <IconBell size={15} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                    {r.name}
+                    {!r.enabled && <Badge>已停用</Badge>}
+                  </div>
+                  <div className="text-xs text-ink-3">
+                    {describeRule(r)} · {serverName(r.server_id)}
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-1">
+              <div className="-mx-1.5 flex gap-1 sm:mx-0">
                 <Button size="sm" variant="ghost" onClick={() => void toggle(r)}>
+                  <IconPower size={14} />
                   {r.enabled ? "停用" : "启用"}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>
+                  <IconPencil size={14} />
                   编辑
                 </Button>
-                <Button size="sm" variant="ghost" className="text-red-600 dark:text-red-400" onClick={() => void remove(r)}>
+                <Button size="sm" variant="danger" className="ml-auto sm:ml-0" onClick={() => void remove(r)}>
+                  <IconTrash size={14} />
                   删除
                 </Button>
               </div>
@@ -550,56 +584,64 @@ function EventsTab() {
   return (
     <div className="space-y-6">
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">当前告警</h2>
+        <h2 className="text-sm font-semibold">当前告警</h2>
         {alerts.length === 0 ? (
-          <p className="text-sm text-zinc-500">一切正常。</p>
+          <p className="flex items-center gap-2 text-sm text-ink-3">
+            <IconCheck size={15} className="text-good" />
+            一切正常。
+          </p>
         ) : (
-          <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <Card className="divide-y divide-line">
             {alerts.map((a) => (
-              <div key={`${a.rule_id}-${a.server_id}`} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
-                <Badge tone="critical">⚠ 告警中</Badge>
+              <div key={`${a.rule_id}-${a.server_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm sm:px-5">
+                <Badge tone="critical">
+                  <IconAlert size={11} />
+                  告警中
+                </Badge>
                 <a className="font-medium hover:underline" href={href({ page: "server", id: a.server_id })}>
                   {a.server_name}
                 </a>
                 <span>{a.rule_name}</span>
-                {a.value != null && <span className="tabular text-zinc-500">当前 {a.value.toFixed(1)}</span>}
-                <span className="ml-auto text-xs text-zinc-500">开始于 {ago(a.since_ms, now)}</span>
+                {a.value != null && <span className="tabular font-mono text-xs text-ink-3">当前 {a.value.toFixed(1)}</span>}
+                <span className="text-xs text-ink-3 sm:ml-auto">开始于 {ago(a.since_ms, now)}</span>
               </div>
             ))}
           </Card>
         )}
       </section>
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">历史事件</h2>
+        <h2 className="text-sm font-semibold">历史事件</h2>
         <ErrorText>{error}</ErrorText>
         {events == null ? (
           !error && <Spinner />
         ) : events.length === 0 ? (
-          <p className="text-sm text-zinc-500">暂无事件。</p>
+          <p className="text-sm text-ink-3">暂无事件。</p>
         ) : (
-          <Card className="overflow-x-auto">
-            <table className="w-full table-fixed text-sm">
-              <colgroup>
-                <col className="w-44" />
-                <col className="w-24" />
-                <col className="w-40" />
-                <col />
-                <col className="w-24" />
-              </colgroup>
-              <tbody>
-                {events.map((e) => (
-                  <tr key={e.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
-                    <td className="tabular px-4 py-2 text-xs whitespace-nowrap text-zinc-500">{dateTime(e.ts_ms)}</td>
-                    <td className="px-4 py-2">
-                      {e.kind === "firing" ? <Badge tone="critical">⚠ 触发</Badge> : <Badge tone="good">✓ 恢复</Badge>}
-                    </td>
-                    <td className="truncate px-4 py-2">{e.server_name}</td>
-                    <td className="truncate px-4 py-2">{e.rule_name}</td>
-                    <td className="tabular px-4 py-2 text-right text-zinc-500">{e.value?.toFixed(1) ?? ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <Card className="divide-y divide-line">
+            {events.map((e) => (
+              <div key={e.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm sm:grid-cols-[10.5rem_5rem_minmax(0,12rem)_1fr_4rem] sm:px-5">
+                <span className="tabular col-span-3 font-mono text-[11px] text-ink-3 sm:col-span-1 sm:text-xs">{dateTime(e.ts_ms)}</span>
+                <span>
+                  {e.kind === "firing" ? (
+                    <Badge tone="critical">
+                      <IconAlert size={11} />
+                      触发
+                    </Badge>
+                  ) : (
+                    <Badge tone="good">
+                      <IconCheck size={11} />
+                      恢复
+                    </Badge>
+                  )}
+                </span>
+                <span className="min-w-0 truncate">
+                  <span className="font-medium">{e.server_name}</span>
+                  <span className="text-ink-3 sm:hidden"> · {e.rule_name}</span>
+                </span>
+                <span className="hidden min-w-0 truncate text-ink-2 sm:block">{e.rule_name}</span>
+                <span className="tabular text-right font-mono text-xs text-ink-3">{e.value?.toFixed(1) ?? ""}</span>
+              </div>
+            ))}
           </Card>
         )}
         {events && more && (
@@ -638,17 +680,24 @@ function NotifyTab({ config }: { config: AppConfig | null }) {
 
   return (
     <div className="max-w-2xl space-y-4">
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-ink-3">
         通知渠道通过 Worker Secret 配置（GitHub Secrets → 重新运行 Deploy，或 <code className="font-mono text-xs">wrangler secret put</code>）。
       </p>
-      <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
+      <Card className="divide-y divide-line">
         {channels.map((c) => (
-          <div key={c.name} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+          <div key={c.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3.5 text-sm sm:px-5">
             <span className="w-24 font-medium">{c.name}</span>
-            {c.enabled ? <Badge tone="good">✓ 已配置</Badge> : <Badge>未配置</Badge>}
-            <span className="text-xs text-zinc-500">{c.secrets}</span>
+            {c.enabled ? (
+              <Badge tone="good">
+                <IconCheck size={11} />
+                已配置
+              </Badge>
+            ) : (
+              <Badge>未配置</Badge>
+            )}
+            <span className="w-full font-mono text-[11px] text-ink-3 sm:w-auto">{c.secrets}</span>
             {c.res && (
-              <span className={cx("ml-auto text-xs", c.res === "ok" ? "text-emerald-600" : c.res === "disabled" ? "text-zinc-500" : "text-red-600")}>
+              <span className={cx("text-xs sm:ml-auto", c.res === "ok" ? "text-good" : c.res === "disabled" ? "text-ink-3" : "text-crit")}>
                 {c.res === "ok" ? "发送成功" : c.res === "disabled" ? "未启用" : c.res}
               </span>
             )}
@@ -657,10 +706,11 @@ function NotifyTab({ config }: { config: AppConfig | null }) {
       </Card>
       <ErrorText>{error}</ErrorText>
       <Button onClick={() => void test()} disabled={busy}>
+        <IconSend size={15} />
         {busy ? "发送中…" : "发送测试通知"}
       </Button>
       {config && (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-ink-3">
           上报间隔 {config.report_interval_s} 秒 · 分钟数据保留 {config.retention.minute_days} 天 · 小时数据保留 {config.retention.hour_days} 天
         </p>
       )}
