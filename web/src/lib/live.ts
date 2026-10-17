@@ -63,6 +63,14 @@ function apply(ev: DashboardEvent) {
       set({ servers });
       return;
     }
+    case "traffic": {
+      const prev = state.servers.get(ev.id);
+      if (!prev) return;
+      const servers = new Map(state.servers);
+      servers.set(ev.id, { ...prev, traffic_month: ev.traffic });
+      set({ servers });
+      return;
+    }
     case "alert": {
       const key = alertKey(ev.alert);
       const rest = state.alerts.filter((a) => alertKey(a) !== key);
@@ -71,6 +79,10 @@ function apply(ev: DashboardEvent) {
       countFiring(servers, alerts);
       set({ alerts, servers });
       return;
+    }
+    default: {
+      const unhandled: never = ev;
+      console.warn("unknown dashboard event", unhandled);
     }
   }
 }
