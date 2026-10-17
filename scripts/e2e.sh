@@ -4,13 +4,18 @@ set -euo pipefail
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 worker_dir="$repo_dir/crates/worker"
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/moni-e2e.XXXXXXXX")
-wrangler_pid=
+quick=false
+case "${1:-}" in
+  --quick) quick=true ;;
+  "") ;;
+  *) echo "Usage: $0 [--quick]" >&2; exit 2 ;;
+esac
 cleanup() {
-  if [[ -n "$wrangler_pid" ]]; then
-    kill "$wrangler_pid" 2>/dev/null || true
-    wait "$wrangler_pid" 2>/dev/null || true
+  if [[ "${E2E_KEEP:-0}" == 1 ]]; then
+    echo "e2e logs/state: $test_dir"
+  else
+    rm -rf -- "$test_dir"
   fi
-  rm -rf -- "$test_dir"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -24,16 +29,12 @@ node -e 'if (Number(process.versions.node.split(".")[0]) < 22 || !globalThis.Web
   exit 1
 }
 
-if [[ "${E2E_AGENT:-auto}" != mock ]]; then
-  if cargo build -p moni-agent >"$test_dir/agent-build.log" 2>&1; then
-    agent_mode=native
-  else
-    echo 'Agent build failed; using a minimal WebSocket agent for B3.'
-    agent_mode=mock
-  fi
-else
-  agent_mode=mock
-fi
+cargo build -p moni-agent >"$test_dir/agent-build.log" 2>&1 || {
+  cat "$test_dir/agent-build.log" >&2; exit 1;
+}
+(cd "$worker_dir" && worker-build --release) >"$test_dir/worker-build.log" 2>&1 || {
+  cat "$test_dir/worker-build.log" >&2; exit 1;
+}
 
 port=${E2E_PORT:-$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')}
 node --input-type=module - "$worker_dir" "$test_dir/config.json" <<'JS'
@@ -44,48 +45,64 @@ const config = JSON.parse(fs.readFileSync(path.join(worker, 'wrangler.jsonc'), '
 delete config.$schema;
 config.main = path.join(worker, config.main);
 config.assets.directory = path.resolve(worker, config.assets.directory);
-config.build.cwd = worker;
+delete config.build;
 config.vars.ADMIN_PASSWORD = 'e2e-admin-password';
 config.vars.AUTH_SECRET = 'e2e-signing-secret-at-least-32-bytes-long';
 fs.writeFileSync(target, JSON.stringify(config));
 JS
 
-CLOUDFLARE_SEND_METRICS=false "$repo_dir/node_modules/.bin/wrangler" dev \
-  --config "$test_dir/config.json" --local --ip 127.0.0.1 --port "$port" \
-  --inspector-port 0 --persist-to "$test_dir/state" >"$test_dir/wrangler.log" 2>&1 &
-wrangler_pid=$!
-ready=false
-for ((attempt = 0; attempt < 180; attempt++)); do
-  if curl --silent --fail "http://127.0.0.1:$port/api/health" > /dev/null; then
-    ready=true
-    break
-  fi
-  if ! kill -0 "$wrangler_pid" 2>/dev/null; then
-    cat "$test_dir/wrangler.log" >&2
-    exit 1
-  fi
-  sleep 1
-done
-if [[ "$ready" != true ]]; then
-  cat "$test_dir/wrangler.log" >&2
-  echo 'Wrangler did not become ready' >&2
-  exit 1
-fi
-
-node --input-type=module - "$port" "$repo_dir" "$agent_mode" "$test_dir" <<'JS'
+node --input-type=module - "$port" "$repo_dir" "$quick" "$test_dir" <<'JS'
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
-const [port, repo, mode, temp] = process.argv.slice(2);
+const [port, repo, quickFlag, temp] = process.argv.slice(2);
+const quick = quickFlag === "true";
+const e2eStartedMs = Date.now();
 const WS = globalThis.WebSocket;
 const base = `http://127.0.0.1:${port}`;
 const password = 'e2e-admin-password';
 const admin = { Authorization: `Bearer ${password}` };
 const sockets = [];
-let agent;
-const timeout = setTimeout(() => { console.error('e2e timed out'); process.exitCode = 1; agent?.kill(); for (const ws of sockets) ws.close(); }, 60_000);
+let agent, wrangler;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const timeout = setTimeout(() => { console.error('e2e timed out'); stopChildren(); process.exit(1); }, 290_000);
+function stopChildren() {
+  agent?.kill('SIGCONT');
+  agent?.kill('SIGTERM');
+  if (wrangler) { try { process.kill(-wrangler.pid, 'SIGKILL'); } catch {} }
+  for (const ws of sockets) if (ws.readyState === 1) ws.close();
+}
+process.on('SIGINT', () => { stopChildren(); process.exit(130); });
+process.on('SIGTERM', () => { stopChildren(); process.exit(143); });
+async function startWorker() {
+  const log = fs.openSync(path.join(temp, 'wrangler.log'), 'a');
+  wrangler = spawn(path.join(repo, 'node_modules/.bin/wrangler'), ['dev',
+    '--config', path.join(temp, 'config.json'), '--local', '--ip', '127.0.0.1',
+    '--port', port, '--inspector-port', '0', '--persist-to', path.join(temp, 'state')], {
+    env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false' },
+    detached: true, stdio: ['ignore', log, log],
+  });
+  fs.closeSync(log);
+  for (let i = 0; i < 200; i++) {
+    try { if ((await fetch(base + '/api/health')).ok) return; } catch {}
+    assert.equal(wrangler.exitCode, null, 'Wrangler exited during startup');
+    await pause(100);
+  }
+  throw new Error('Wrangler did not become ready');
+}
+async function stopWorker() {
+  const exited = once(wrangler, 'exit');
+  process.kill(-wrangler.pid, 'SIGKILL');
+  await exited;
+  wrangler = undefined;
+}
+function editStorage(source) {
+  const result = spawnSync('python3', ['-c', source, path.join(temp, 'state')], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
 async function api(url, status = 200, { method = 'GET', headers = {}, body } = {}) {
   const response = await fetch(base + url, {
     method, headers: { 'Content-Type': 'application/json', ...headers },
@@ -102,8 +119,8 @@ function socket(url, headers) {
   const closed = new Promise(resolve => ws.addEventListener('close', event => resolve(event.code)));
   return { ws, events, closed };
 }
-async function event(client, type, matches = () => true) {
-  for (let i = 0; i < 200; i++) {
+async function event(client, type, matches = () => true, waitMs = 10_000) {
+  for (let i = 0; i < waitMs / 50; i++) {
     const found = client.events.find(e => e.type === type && matches(e));
     if (found) return found;
     await pause(50);
@@ -128,6 +145,7 @@ async function rejectedUpgrade(token, extra = {}) {
   });
 }
 try {
+  await startWorker();
   assert.equal(await (await api('/api/health')).json(), 'ok');
   assert.equal((await (await api('/api/auth/me', 401)).json()).error, 'unauthorized');
   await api('/api/auth/me', 401, { headers: { Authorization: `Bearer ${password}x` } });
@@ -144,7 +162,7 @@ try {
   await api('/api/auth/me', 401, { headers: { Cookie: Cookie + 'x' } });
   const config = await (await api('/api/config', 200, { headers: admin })).json();
   assert.deepEqual(config.retention, { minute_days: 7, hour_days: 90 });
-  const dash = socket('/ws/dashboard', { Cookie });
+  let dash = socket('/ws/dashboard', { Cookie });
   assert.deepEqual((await event(dash, 'snapshot')).alerts, []);
   const created = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { name: 'E2E VPS' } })).json();
   const { server, token } = created;
@@ -158,25 +176,55 @@ try {
   await api('/api/servers', 400, { method: 'POST', headers: admin, body: { id: 'INVALID', name: 'Bad id' } });
   const collision = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { name: 'E2E VPS' } })).json();
   assert.equal(collision.server.id, 'e2e-vps-2');
+  // Deterministic history fixtures exercise aggregation/percentages independently of the host load.
+  const fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+  await event(fixture, 'welcome');
+  const fixtureHour = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3 * 3_600_000;
+  const rollup = (minute_ms, cpu_avg, rx_bytes, peak) => ({ type: 'rollup', minute_ms,
+    samples: 60, cpu_avg, cpu_max: cpu_avg + 5, mem_used_avg: cpu_avg / 10,
+    mem_total: 10, swap_used_avg: 0, swap_total: 0, disk_used: 4, disk_total: 8,
+    rx_bytes, tx_bytes: rx_bytes / 10, rx_bps_max: peak, tx_bps_max: peak + 1,
+    load1_avg: cpu_avg / 10 });
+  for (const message of [rollup(fixtureHour + 60_000, 10, 100, 5),
+    rollup(fixtureHour + 120_000, 30, 200, 15), rollup(fixtureHour + 120_000, 30, 200, 15),
+    rollup(fixtureHour + 1_200_000, 50, 300, 10), rollup(60_000, 10, 1000, 1),
+    rollup(Math.floor(Date.now() / 60_000) * 60_000 + 180_000, 10, 1000, 1)]) {
+    fixture.events.length = 0;
+    fixture.ws.send(JSON.stringify(message));
+    assert.equal((await event(fixture, 'ack')).minute_ms, message.minute_ms);
+  }
+  const fixturePath = `/api/servers/${collision.server.id}/history`;
+  await api(fixturePath + '?range=bad', 400, { headers: admin });
+  await api('/api/servers/missing/history?range=1h', 404, { headers: admin });
+  for (const [range, step_ms, count] of [['1h', 60_000, 0], ['6h', 60_000, 3],
+    ['24h', 60_000, 3], ['7d', 600_000, 2], ['30d', 3_600_000, 0], ['90d', 3_600_000, 0]]) {
+    const history = await (await api(fixturePath + '?range=' + range, 200, { headers: admin })).json();
+    assert.equal(history.range, range);
+    assert.equal(history.step_ms, step_ms);
+    assert.equal(history.points.length, count);
+    assert.deepEqual(history.points.map(p => p.ts_ms), history.points.map(p => p.ts_ms).sort((a,b) => a-b));
+    if (range === '7d') assert.deepEqual(history.points[0], { ts_ms: fixtureHour,
+      cpu_avg: 20, cpu_max: 35, mem_pct: 20, swap_pct: 0, disk_pct: 50,
+      rx_bytes: 300, tx_bytes: 30, rx_bps_max: 15, tx_bps_max: 16, load1: 2 });
+  }
+  assert.equal((await (await api(fixturePath, 200, { headers: admin })).json()).range, '24h');
+  // Neither message nor credential may be echoed, and a burst produces just one warning.
+  for (let i = 0; i < 10; i++) fixture.ws.send(JSON.stringify({ type: 'mn_DO_NOT_LOG_THIS_TOKEN' }));
+  await pause(100);
+  const warnings = fs.readFileSync(path.join(temp, 'wrangler.log'), 'utf8');
+  assert.ok(!warnings.includes('mn_DO_NOT_LOG_THIS_TOKEN'));
+  assert.equal(warnings.split(`Invalid Agent message server=${collision.server.id}:`).length - 1, 1);
+  fixture.ws.close();
   await rejectedUpgrade(`mn_${server.id}_${Buffer.alloc(32, 1).toString('base64url')}`, { 'x-moni-server-id': server.id, 'x-moni-token-hash': 'forged' });
   await rejectedUpgrade('bad-token', { 'x-moni-server-id': server.id, 'x-moni-token-hash': 'forged' });
-  let mock;
-  if (mode === 'native') {
-    agent = spawn(path.join(repo, 'target/debug/moni-agent'), [], {
-      env: { ...process.env, MONI_SERVER: base.replace('http:', 'ws:') + '/ws/agent', MONI_TOKEN: token },
-      stdio: ['ignore', fs.openSync(path.join(temp, 'agent.log'), 'w'), 'pipe'],
-    });
-  } else {
-    mock = socket('/ws/agent', { Authorization: `Bearer ${token}` });
-    const welcome = await event(mock, 'welcome');
-    assert.equal(welcome.server_id, server.id);
-    mock.ws.send(JSON.stringify({ type: 'hello', protocol: 2, agent_version: 'e2e', host: {
-      hostname: 'e2e', os: 'linux', kernel: 'test', arch: 'x86_64', cpu_model: 'test', cpu_cores: 1, boot_time_ms: Date.now() - 10_000,
-    }}));
-    mock.ws.send(JSON.stringify({ type: 'metrics', seq: 1, ts_ms: Date.now(), cpu_pct: 1,
-      mem_used: 1, mem_total: 2, swap_used: 0, swap_total: 0, disk_used: 1, disk_total: 2,
-      net_rx_bps: 1, net_tx_bps: 1, load1: 0, load5: 0, load15: 0, uptime_s: 10, process_count: 1 }));
-  }
+  const agentLog = fs.openSync(path.join(temp, 'agent.log'), 'w');
+  const startedMs = Date.now();
+  agent = spawn(path.join(repo, 'target/debug/moni-agent'), [], {
+    env: { ...process.env, MONI_SERVER: base.replace('http:', 'ws:') + '/ws/agent',
+      MONI_TOKEN: token, MONI_IFACES: 'lo' },
+    stdio: ['ignore', agentLog, agentLog],
+  });
+  fs.closeSync(agentLog);
   await event(dash, 'online', e => e.id === server.id);
   await event(dash, 'metrics', e => e.id === server.id);
   const listed = await (await api('/api/servers', 200, { headers: admin })).json();
@@ -187,11 +235,97 @@ try {
   const renamed = await (await api(`/api/servers/${server.id}`, 200, { method: 'PATCH', headers: admin, body: { name: 'Renamed' } })).json();
   assert.equal(renamed.name, 'Renamed');
   await event(dash, 'server_upsert', e => e.server.name === 'Renamed');
-  const agentExited = agent && new Promise(resolve => agent.once('exit', code => resolve(code)));
+  if (!quick) {
+    console.log('Waiting for more than two minutes of native Agent rollups...');
+    while (Date.now() - startedMs < 125_000) {
+      await api('/api/servers', 200, { headers: admin });
+      await pause(1000);
+    }
+    let history = await (await api(`/api/servers/${server.id}/history?range=1h`, 200, { headers: admin })).json();
+    assert.ok(history.points.length >= 2, 'Native Agent must persist at least two minutes');
+    const status = (await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === server.id);
+    assert.ok(status.traffic_month.rx_bytes + status.traffic_month.tx_bytes > 0);
+    const freshDash = socket('/ws/dashboard', { Cookie });
+    assert.deepEqual((await event(freshDash, 'snapshot')).servers.find(s => s.id === server.id).traffic_month, status.traffic_month);
+    const late = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+    await event(late, 'welcome');
+    late.ws.send(JSON.stringify(rollup(fixtureHour + 120_000, 30, 400, 15)));
+    await event(late, 'ack');
+    console.log('Killing Wrangler for 62s while Agent keeps sampling and queues rollups...');
+    await stopWorker();
+    // Force maintenance on restart and add expired rows; SQL edits happen only with workerd stopped.
+    editStorage(`
+import pathlib, sqlite3, sys, time
+for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
+    db = sqlite3.connect(file)
+    if not db.execute("SELECT name FROM sqlite_master WHERE name='metrics_1m'").fetchone():
+        db.close(); continue
+    assert db.execute("SELECT COUNT(*) FROM dirty_hours WHERE server_id='e2e-vps-2'").fetchone()[0] == 1
+    db.execute("UPDATE meta SET v='0' WHERE k='last_hourly_ms'")
+    for table in ('metrics_1m', 'metrics_1h'):
+        db.execute(f"INSERT INTO {table} (server_id,ts_ms) VALUES ('e2e-vps',0)")
+    db.commit(); db.close()
+`);
+    await pause(62_000);
+    await startWorker();
+    const restartedMs = Date.now();
+    dash = socket('/ws/dashboard', { Cookie });
+    await event(dash, 'snapshot');
+    await event(dash, 'metrics', e => e.id === server.id, 50_000);
+    // Wait for the first alarm after restart to aggregate/clean the persisted fixtures.
+    await pause(Math.max(0, 31_000 - (Date.now() - restartedMs)));
+    history = await (await api(`/api/servers/${server.id}/history?range=1h`, 200, { headers: admin })).json();
+    assert.match(fs.readFileSync(path.join(temp, 'agent.log'), 'utf8'), /resent pending rollups count=[1-9]/,
+      'The running Agent must replay at least one rollup queued during the outage');
+    const minutes = new Set(history.points.map(point => point.ts_ms));
+    const firstRequired = Math.floor(startedMs / 60_000) * 60_000 + 60_000;
+    const lastRequired = Math.floor(Date.now() / 60_000) * 60_000 - 60_000;
+    for (let minute = firstRequired; minute <= lastRequired; minute += 60_000) {
+      assert.ok(minutes.has(minute), `Missing minute across restart: ${minute}`);
+    }
+    assert.ok(history.points.length >= 3);
+    for (const range of ['30d', '90d']) {
+      const hourly = await (await api(fixturePath + '?range=' + range, 200, { headers: admin })).json();
+      assert.equal(hourly.points.length, 1);
+      assert.equal(hourly.points[0].rx_bytes, 800, 'Dirty hour must be rebuilt after the late replacement');
+      assert.equal(hourly.points[0].cpu_avg, 30);
+      assert.equal(hourly.points[0].cpu_max, 55);
+      assert.equal(hourly.points[0].rx_bps_max, 15);
+    }
+    const fixtureStatus = (await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === collision.server.id);
+    const inMonth = fixtureHour >= fixtureStatus.traffic_month.since_ms;
+    assert.equal(fixtureStatus.traffic_month.rx_bytes, inMonth ? 800 : 0);
+    const checked = editStorage(`
+import pathlib, sqlite3, sys
+found = False
+for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
+    db = sqlite3.connect(f'file:{file}?mode=ro', uri=True)
+    if not db.execute("SELECT name FROM sqlite_master WHERE name='metrics_1m'").fetchone():
+        db.close(); continue
+    found = True
+    for table in ('metrics_1m', 'metrics_1h'):
+        assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE ts_ms=0").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM dirty_hours").fetchone()[0] == 0
+    db.close()
+assert found
+print('hourly aggregation, dirty hours and per-server retention passed')
+`);
+    console.log(checked);
+    console.log(`Restart passed: ${history.points.length} continuous native minute buckets`);
+    dash.events.length = 0;
+    agent.kill('SIGSTOP');
+    await event(dash, 'offline', e => e.id === server.id, 46_000);
+    const offline = (await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === server.id);
+    assert.equal(offline.online, false);
+    assert.equal(offline.metrics, null);
+    agent.kill('SIGCONT');
+    await event(dash, 'online', e => e.id === server.id, 15_000);
+    console.log('SIGSTOP passed: dashboard received offline, Agent resumed and reconnected');
+  }
+  const agentExited = once(agent, 'exit');
   const rotated = await (await api(`/api/servers/${server.id}/token`, 200, { method: 'POST', headers: admin })).json();
   assert.ok(rotated.token !== token, 'Token rotation must issue a new credential');
-  if (mock) assert.equal(await mock.closed, 4003);
-  else assert.equal(await agentExited, 3, 'Agent must exit with code 3 after token revocation (WS 4003)');
+  assert.equal((await agentExited)[0], 3, 'Agent must exit with code 3 after token revocation (WS 4003)');
   await event(dash, 'offline', e => e.id === server.id);
   await rejectedUpgrade(token);
   const renewed = socket('/ws/agent', { Authorization: `Bearer ${rotated.token}` });
@@ -227,10 +361,9 @@ try {
     return response.status;
   }));
   assert.ok(failures.includes(429), 'Consecutive login failures must be rate limited');
-  console.log(`e2e passed: auth, config, CRUD, token rejection/revocation, dashboard online/metrics (${mode} agent)`);
+  console.log(`e2e passed: auth, config, CRUD, token rejection/revocation, dashboard, history/rollup (${quick ? "quick; long scenarios skipped" : "full; restart and SIGSTOP"}); ${((Date.now() - e2eStartedMs) / 1000).toFixed(1)}s`);
 } finally {
   clearTimeout(timeout);
-  agent?.kill();
-  for (const ws of sockets) if (ws.readyState === 1) ws.close();
+  stopChildren();
 }
 JS

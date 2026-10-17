@@ -1,12 +1,12 @@
 use moni_protocol::api::{
     ApiErrorCode, CreateServerRequest, CreateServerResponse, DashboardEvent, HostInfo,
-    ServerStatus, TokenResponse, Traffic, UpdateServerRequest,
+    ServerStatus, TokenResponse, UpdateServerRequest,
 };
 use serde::Deserialize;
 use worker::*;
 
 use super::{Hub, TAG_AGENT, agent_conn};
-use crate::{auth, error};
+use crate::{auth, error, logic::slug};
 
 #[derive(Deserialize)]
 pub(super) struct ServerRow {
@@ -17,26 +17,6 @@ pub(super) struct ServerRow {
     pub host_json: Option<String>,
     pub agent_version: Option<String>,
     pub token_hash: String,
-}
-
-fn slug(name: &str) -> String {
-    let mut id = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if id.len() == 32 {
-                break;
-            }
-            id.push(ch.to_ascii_lowercase());
-        } else if !id.is_empty() && !id.ends_with('-') && id.len() < 32 {
-            id.push('-');
-        }
-    }
-    let id = id.trim_end_matches('-');
-    if id.is_empty() {
-        "server".into()
-    } else {
-        id.into()
-    }
 }
 
 fn valid_name(name: &str) -> bool {
@@ -55,19 +35,15 @@ impl Hub {
             .next())
     }
 
-    fn status(&self, row: ServerRow) -> ServerStatus {
+    fn status(&self, row: ServerRow) -> Result<ServerStatus> {
         let live = self
             .state
             .get_websockets_with_tag(&super::tag_for(&row.id))
             .iter()
             .filter_map(agent_conn)
             .find(|c| !c.closing);
-        let now = js_sys::Date::new_0();
-        let since_ms = js_sys::Date::utc(
-            f64::from(now.get_utc_full_year()),
-            f64::from(now.get_utc_month()),
-        ) as i64;
-        ServerStatus {
+        let traffic_month = self.traffic_month(&row.id)?;
+        Ok(ServerStatus {
             id: row.id,
             name: row.name,
             created_ms: row.created_ms,
@@ -78,32 +54,26 @@ impl Hub {
                 .host_json
                 .and_then(|json| serde_json::from_str::<HostInfo>(&json).ok()),
             metrics: live.and_then(|c| c.latest),
-            // shortcut: B3 exposes the contract; B4/B5 supply traffic and alert counts.
-            traffic_month: Traffic {
-                rx_bytes: 0,
-                tx_bytes: 0,
-                since_ms,
-            },
+            traffic_month,
             alerts_firing: 0,
-        }
+        })
     }
 
     pub(super) fn snapshot(&self) -> Result<Vec<ServerStatus>> {
-        Ok(self
-            .state
+        self.state
             .storage()
             .sql()
             .exec("SELECT * FROM servers ORDER BY name, id", None)?
             .to_array::<ServerRow>()?
             .into_iter()
             .map(|row| self.status(row))
-            .collect())
+            .collect()
     }
 
     pub(super) fn upsert_event(&self, id: &str) -> Result<()> {
         if let Some(row) = self.server_row(id)? {
             self.broadcast(&DashboardEvent::ServerUpsert {
-                server: self.status(row),
+                server: self.status(row)?,
             });
         }
         Ok(())
@@ -150,8 +120,11 @@ impl Hub {
                 auth::now_ms().into(),
             ],
         )?;
+        if self.state.storage().get_alarm().await?.is_none() {
+            self.schedule_alarm().await?;
+        }
         let row = self.server_row(&id)?.ok_or("Created server is missing")?;
-        let server = self.status(row);
+        let server = self.status(row)?;
         self.broadcast(&DashboardEvent::ServerUpsert {
             server: server.clone(),
         });
@@ -175,7 +148,7 @@ impl Hub {
             )?;
         }
         let row = self.server_row(id)?.ok_or("Updated server is missing")?;
-        let server = self.status(row);
+        let server = self.status(row)?;
         self.broadcast(&DashboardEvent::ServerUpsert {
             server: server.clone(),
         });
@@ -237,20 +210,5 @@ impl Hub {
             .get_websockets_with_tag(TAG_AGENT)
             .iter()
             .any(|ws| agent_conn(ws).is_some_and(|c| !c.closing))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn slugs_are_valid_and_bounded() {
-        for name in [" My VPS / 2 ", "中文", "---", "", "LONG", &"a".repeat(100)] {
-            assert!(auth::valid_id(&slug(name)));
-        }
-        assert_eq!(slug(" My VPS / 2 "), "my-vps-2");
-        assert_eq!(slug("中文"), "server");
-        assert!(!valid_name(" \n "));
     }
 }

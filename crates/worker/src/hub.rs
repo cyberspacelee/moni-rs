@@ -1,5 +1,6 @@
 //! Persistent state lives in SQLite; live connection state survives hibernation in attachments.
 
+mod data;
 mod schema;
 mod servers;
 
@@ -12,7 +13,7 @@ use worker::*;
 
 use crate::{
     auth::{self, H_SERVER_ID, H_TOKEN_HASH, now_ms},
-    error, report_interval,
+    error, logic, report_interval,
 };
 
 const TAG_AGENT: &str = "agent";
@@ -33,6 +34,8 @@ struct AgentConn {
     last_seen_ms: i64,
     closing: bool,
     latest: Option<MetricsFrame>,
+    #[serde(default)]
+    parse_warn_ms: Option<i64>,
 }
 
 fn tag_for(id: &str) -> String {
@@ -103,8 +106,21 @@ impl DurableObject for Hub {
         let WebSocketIncomingMessage::String(text) = message else {
             return Ok(());
         };
-        let Ok(message) = serde_json::from_str::<AgentMessage>(&text) else {
-            return Ok(());
+        let message = match serde_json::from_str::<AgentMessage>(&text) {
+            Ok(message) => message,
+            Err(error) => {
+                let now = now_ms();
+                if logic::warning_due(conn.parse_warn_ms, now) {
+                    console_warn!(
+                        "Invalid Agent message server={}: {}",
+                        conn.server_id,
+                        logic::safe_parse_error(&error)
+                    );
+                    conn.parse_warn_ms = Some(now);
+                    save(&ws, conn)?;
+                }
+                return Ok(());
+            }
         };
         conn.last_seen_ms = now_ms();
         match message {
@@ -149,8 +165,8 @@ impl DurableObject for Hub {
                 });
             }
             AgentMessage::Rollup(rollup) => {
+                self.store_rollup(&conn.server_id, &rollup)?;
                 save(&ws, conn)?;
-                // shortcut: B3 acknowledges without storage; B4 must persist before Ack.
                 ws.send(&HubMessage::Ack {
                     minute_ms: rollup.minute_ms,
                 })?;
@@ -176,6 +192,15 @@ impl DurableObject for Hub {
     }
 
     async fn alarm(&self) -> Result<Response> {
+        // Reschedule before fallible work so a bad row or connection cannot stop maintenance.
+        let had_agents = self.has_agents();
+        let scheduled = match self.schedule_alarm().await {
+            Ok(()) => true,
+            Err(error) => {
+                console_error!("Hub alarm scheduling failed: {}", error);
+                false
+            }
+        };
         let now = now_ms();
         let interval_ms = i64::from(report_interval(&self.env)) * 1000;
         for ws in self.state.get_websockets_with_tag(TAG_AGENT) {
@@ -183,11 +208,20 @@ impl DurableObject for Hub {
                 continue;
             };
             if now - conn.last_seen_ms > 3 * interval_ms {
-                self.on_disconnect(&ws)?;
+                if let Err(error) = self.on_disconnect(&ws) {
+                    console_error!("Hub stale disconnect failed: {}", error);
+                }
                 let _ = ws.close(Some(4000), Some("stale"));
             }
         }
-        self.schedule_alarm().await?;
+        if let Err(error) = self.maintain(now) {
+            console_error!("Hub maintenance failed: {}", error);
+        }
+        if (!scheduled || had_agents != self.has_agents())
+            && let Err(error) = self.schedule_alarm().await
+        {
+            console_error!("Hub alarm scheduling failed: {}", error);
+        }
         Response::from_json(&"ok")
     }
 }
@@ -209,6 +243,10 @@ impl Hub {
                 if let Some(id) = rest.strip_suffix("/token") {
                     if req.method() == Method::Post && auth::valid_id(id) {
                         return self.rotate_token(id);
+                    }
+                } else if let Some(id) = rest.strip_suffix("/history") {
+                    if req.method() == Method::Get && auth::valid_id(id) {
+                        return self.history(id, &req);
                     }
                 } else if auth::valid_id(rest) {
                     match req.method() {
@@ -291,6 +329,7 @@ impl Hub {
                 last_seen_ms: now,
                 closing: false,
                 latest: None,
+                parse_warn_ms: None,
             },
         )?;
         pair.server.send(&HubMessage::Welcome {
