@@ -7,7 +7,7 @@
 
 | 范围内 | 范围外（后续版本） |
 |---|---|
-| Agent：采集、实时帧、Agent 端分钟聚合 + ACK 重发、自动重连、systemd 安装 | Agent 本地磁盘持久化队列、自动升级 |
+| Agent：采集、实时帧、Agent 端分钟聚合 + ACK 重发、自动重连、systemd 安装、签名自动更新及管理 API 升级 | Agent 本地磁盘持久化队列 |
 | 每台服务器独立 token（HMAC 存储），服务器增删改、轮换 token | 多用户 / 多租户 |
 | 管理员密码登录（签名 Cookie），Bearer 方式供 CLI 使用 | OAuth、Cloudflare Access 集成（文档说明即可） |
 | 实时看板（WS）、历史曲线（1h～90d）、本月流量 | 公开状态页 |
@@ -218,4 +218,4 @@ React 19 + TypeScript + Tailwind v4 + Vite，图表用 uPlot。构建产物放�
 
 - `deploy.yml`：依次构建 web → worker-build → `wrangler deploy` → `wrangler secret bulk`（`ADMIN_PASSWORD`、`AUTH_SECRET`，可选 `TG_BOT_TOKEN`、`TG_CHAT_ID`、`WEBHOOK_URL`）。部署时通过 `--var AGENT_RELEASE_REPO:${{ github.repository }}` 注入发布仓库。
 - `release-agent.yml`：用 cargo-zigbuild 的 `agent-release` profile 构建 musl amd64/arm64，发布二进制、安装/更新脚本、公钥、`SHA256SUMS` 和签名。
-- 安装脚本必须使用本机可信公钥验签并校验 SHA256；支持 `--uninstall`。
+- 安装脚本内置项目公钥，首次安装自动固定；后续使用本机固定公钥验签并校验 SHA256。新增与轮换可直接使用页面命令，显式参数只更新对应配置项；已有安装无参数重跑即可升级并保留配置。支持 `--uninstall`。

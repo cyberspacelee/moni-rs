@@ -1,25 +1,25 @@
 #!/bin/sh
-# 用法：sudo sh install-agent.sh --server wss://<host>/ws/agent --token mn_xxx --repo owner/repo --update-public-key FILE
+# 首装：sudo sh install-agent.sh --server wss://<host>/ws/agent --token mn_xxx --repo owner/repo
 set -eu
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 fail() { echo "moni-agent: $*" >&2; exit 1; }
 usage() {
-  echo 'Usage: install-agent.sh --server URL --token TOKEN --repo OWNER/REPO [--interval SECONDS] [--version vX.Y.Z]'
-  echo '       [--update-public-key FILE] [--auto-update] [--reconfigure]'
-  echo '       First installation requires --update-public-key; reinstall reuses the pinned local key.'
+  echo 'Usage: install-agent.sh [--server URL] [--token TOKEN] [--repo OWNER/REPO] [--interval SECONDS] [--version vX.Y.Z]'
+  echo '       [--update-public-key FILE] [--auto-update]'
+  echo '       First installation requires --server, --token and --repo; reinstall preserves omitted settings.'
+  echo '       The bundled public key is pinned on first installation; --update-public-key explicitly replaces it.'
   echo '       install-agent.sh --uninstall'
 }
 
-REPO=${MONI_REPO:-}
+REPO=
 SERVER=
 TOKEN=
-INTERVAL=2
+INTERVAL=
 VERSION=
 UPDATE_PUBLIC_KEY=
 AUTO_UPDATE=false
-RECONFIGURE=false
 UNINSTALL=false
 arg_count=$#
 while [ "$#" -gt 0 ]; do
@@ -37,7 +37,6 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2 ;;
     --auto-update) AUTO_UPDATE=true; shift ;;
-    --reconfigure) RECONFIGURE=true; shift ;;
     --uninstall)
       [ "$arg_count" -eq 1 ] || fail '--uninstall must be used alone'
       UNINSTALL=true
@@ -79,17 +78,18 @@ if [ "$UNINSTALL" = true ]; then
   exit 0
 fi
 
-[ -n "$SERVER" ] && [ -n "$TOKEN" ] && [ -n "$REPO" ] || fail 'required: --server, --token, --repo (or MONI_REPO)'
-case "$REPO$VERSION$INTERVAL" in
-  *[![:graph:]]*) fail '--repo, --version and --interval must not contain whitespace or control characters' ;;
-esac
-case "$SERVER" in ws://?*|wss://?*) ;; *) fail '--server must be a ws:// or wss:// URL' ;; esac
-# EnvironmentFile values must not introduce quotes, escapes or additional lines.
-case "$SERVER" in *[![:graph:]]*|*\"*|*\'*|*\\*) fail '--server contains unsupported characters' ;; esac
-case "$TOKEN" in mn_?*) ;; *) fail '--token must be a moni token (mn_...)' ;; esac
-case "$TOKEN" in *[!a-zA-Z0-9_-]*) fail '--token contains unsupported characters' ;; esac
-printf '%s\n' "$REPO" | grep -Eq '^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$' || fail '--repo must be OWNER/REPO'
-printf '%s\n' "$INTERVAL" | grep -Eq '^[1-9][0-9]{0,9}$' && [ "$INTERVAL" -le 4294967295 ] || fail '--interval must be 1..4294967295 seconds'
+if [ -n "$SERVER" ]; then
+  case "$SERVER" in ws://?*|wss://?*) ;; *) fail '--server must be a ws:// or wss:// URL' ;; esac
+  # EnvironmentFile values must not introduce quotes, escapes or additional lines.
+  case "$SERVER" in *[![:graph:]]*|*\"*|*\'*|*\\*) fail '--server contains unsupported characters' ;; esac
+fi
+if [ -n "$TOKEN" ]; then
+  case "$TOKEN" in mn_?*) ;; *) fail '--token must be a moni token (mn_...)' ;; esac
+  case "$TOKEN" in *[!a-zA-Z0-9_-]*) fail '--token contains unsupported characters' ;; esac
+fi
+if [ -n "$INTERVAL" ]; then
+  printf '%s\n' "$INTERVAL" | grep -Eq '^[1-9][0-9]{0,9}$' && [ "$INTERVAL" -le 4294967295 ] || fail '--interval must be 1..4294967295 seconds'
+fi
 if [ -n "$VERSION" ]; then
   printf '%s\n' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$' || fail '--version must be a stable vX.Y.Z tag'
 fi
@@ -101,22 +101,49 @@ case "$(uname -m)" in
   aarch64|arm64) ARCH=arm64 ;;
   *) fail 'supported architectures: amd64, arm64' ;;
 esac
-[ ! -L /etc/moni ] && [ ! -L "$ENV_FILE" ] && [ ! -L "$REQUEST_DIR" ] || fail 'unsafe configuration or state path'
+[ ! -L "$REQUEST_DIR" ] || fail 'unsafe state path'
+for trusted_path in /etc/moni "$ENV_FILE" "$PUBLIC_KEY" "$UPDATE_CONF"; do
+  [ ! -L "$trusted_path" ] || fail 'unsafe configuration path'
+  if [ -e "$trusted_path" ]; then
+    if [ "$trusted_path" = /etc/moni ]; then
+      [ -d "$trusted_path" ] || fail 'unsafe configuration directory'
+    else
+      [ -f "$trusted_path" ] || fail 'unsafe configuration file'
+    fi
+    metadata=$(stat -c '%u:%a' -- "$trusted_path")
+    [ "${metadata%%:*}" = 0 ] && [ "$((0${metadata#*:} & 022))" -eq 0 ] || fail 'unsafe configuration permissions'
+  fi
+done
 
 KEY_SOURCE=$UPDATE_PUBLIC_KEY
-if [ -z "$KEY_SOURCE" ]; then
-  [ -f "$PUBLIC_KEY" ] && [ -f "$UPDATE_CONF" ] || fail 'first installation requires a trusted --update-public-key'
-  for trusted_path in /etc/moni "$PUBLIC_KEY" "$UPDATE_CONF"; do
-    [ ! -L "$trusted_path" ] || fail 'unsafe update configuration'
-    metadata=$(stat -c '%u:%a' -- "$trusted_path")
-    [ "${metadata%%:*}" = 0 ] && [ "$((0${metadata#*:} & 022))" -eq 0 ] || fail 'unsafe update configuration permissions'
-  done
+if [ -e "$PUBLIC_KEY" ] || [ -e "$UPDATE_CONF" ]; then
+  [ -f "$PUBLIC_KEY" ] && [ -f "$UPDATE_CONF" ] || fail 'incomplete pinned update configuration'
   [ "$(stat -c '%a' -- "$UPDATE_CONF")" = 600 ] || fail 'update.conf must have mode 600'
   configured_repo=$(awk '/^REPO=/ { n++; sub(/^REPO=/, ""); print } END { if (n != 1) exit 1 }' "$UPDATE_CONF") || fail 'invalid update configuration'
-  [ "$configured_repo" = "$REPO" ] || fail 'changing the pinned repository requires --update-public-key'
-  KEY_SOURCE=$PUBLIC_KEY
+  if [ -z "$REPO" ]; then
+    REPO=$configured_repo
+  elif [ "$REPO" != "$configured_repo" ] && [ -z "$KEY_SOURCE" ]; then
+    fail 'changing the pinned repository requires --update-public-key'
+  fi
+  if [ -z "$KEY_SOURCE" ]; then KEY_SOURCE=$PUBLIC_KEY; fi
+elif [ -z "$REPO" ]; then
+  REPO=${MONI_REPO:-}
 fi
-[ -f "$KEY_SOURCE" ] || fail 'public key file not found'
+[ -n "$REPO" ] || fail 'required: --repo (or MONI_REPO on first installation)'
+case "$REPO$VERSION$INTERVAL" in
+  *[![:graph:]]*) fail '--repo, --version and --interval must not contain whitespace or control characters' ;;
+esac
+printf '%s\n' "$REPO" | grep -Eq '^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$' || fail '--repo must be OWNER/REPO'
+if [ -f "$ENV_FILE" ]; then
+  [ -n "$SERVER" ] || grep -q '^[[:space:]]*MONI_SERVER=' "$ENV_FILE" || fail 'existing configuration requires --server'
+  [ -n "$TOKEN" ] || grep -q '^[[:space:]]*MONI_TOKEN=' "$ENV_FILE" || fail 'existing configuration requires --token'
+else
+  [ -n "$SERVER" ] && [ -n "$TOKEN" ] || fail 'first installation requires --server and --token'
+  if [ -z "$INTERVAL" ]; then INTERVAL=2; fi
+fi
+if [ -n "$KEY_SOURCE" ]; then
+  [ ! -L "$KEY_SOURCE" ] && [ -f "$KEY_SOURCE" ] || fail 'public key file not found or unsafe'
+fi
 
 umask 077
 tmp_dir=$(mktemp -d /tmp/moni-install.XXXXXXXX)
@@ -131,7 +158,23 @@ trap cleanup 0
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-cp "$KEY_SOURCE" "$tmp_dir/release.pub"
+if [ -n "$KEY_SOURCE" ]; then
+  cp "$KEY_SOURCE" "$tmp_dir/release.pub"
+else
+  cat > "$tmp_dir/release.pub" <<'MONI_RELEASE_PUBLIC_KEY'
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA2Og3YNdIDqmH7Q4QdMrz
+VObbAkuBBFcQ3fIlkgDS82ZDdOqUfzrPeXiu/N3TCtIvfAjdzmSD7hbRSgYaV/W5
+F0CwVlYsPKCuvyF0lYljQ2Y6sRcxCv0zaAaJ4YEuHBFL92t3ZT7SYatPnph5XDyO
+Erm6vQOS2ZC+PuT4/KZKmFfTW1bjdLSh9n0LBEz4+xfBFzIPcxH05+AhTwCGIBDf
+YUPRgoRDJafJfN1tfS65xWkA8paLv3u9XNO2Dbr7sW+lmKn2O3PksCTH0m+Lf8dR
+BiaqBNhqyDI4Ibw4P9Q4lP+KCPjI9qMOS1ahvAIGGGYXySmgiyqXcqa/f4cWkB6g
+lubOVef9YOZjaLuWO5cAUeGy+oJ/UqXU9H+wystmEfVXfpn/u1cyBtErn06bFae2
+2PR7bzuqmw7b5TgvCyiWbmLJEoAzV3xbPxrYaGTSsyJ4AF/uf7rV2mzi696kyOEi
+6oHIzCx260gGY2PIvfu5pcTr1P7dkKjLr1Albe+RmPWVAgMBAAE=
+-----END PUBLIC KEY-----
+MONI_RELEASE_PUBLIC_KEY
+fi
 KEY_SOURCE=$tmp_dir/release.pub
 key_bits=$(openssl rsa -pubin -in "$KEY_SOURCE" -text -noout 2>/dev/null |
   sed -n 's/^Public-Key: (\([0-9][0-9]*\) bit)$/\1/p')
@@ -184,18 +227,20 @@ mv -f "$binary_tmp" "$BIN"
 binary_tmp=
 env_tmp=$(mktemp "$ENV_FILE.XXXXXXXX")
 if [ -f "$ENV_FILE" ]; then
-  awk -v reconfigure="$RECONFIGURE" '
+  awk -v server_set="${SERVER:+1}" -v token_set="${TOKEN:+1}" -v interval_set="${INTERVAL:+1}" '
     /^[[:space:]]*MONI_UPDATE_REPO=/ { next }
-    reconfigure == "true" && /^[[:space:]]*MONI_(SERVER|TOKEN|INTERVAL)=/ { next }
+    server_set && /^[[:space:]]*MONI_SERVER=/ { next }
+    token_set && /^[[:space:]]*MONI_TOKEN=/ { next }
+    interval_set && /^[[:space:]]*MONI_INTERVAL=/ { next }
     { print }
   ' "$ENV_FILE" > "$env_tmp"
 else
   : > "$env_tmp"
 fi
-if [ ! -f "$ENV_FILE" ] || [ "$RECONFIGURE" = true ]; then
-  printf 'MONI_SERVER="%s"\nMONI_TOKEN="%s"\nMONI_INTERVAL=%s\n' "$SERVER" "$TOKEN" "$INTERVAL" >> "$env_tmp"
-fi
-printf '\nMONI_UPDATE_REPO="%s"\n' "$REPO" >> "$env_tmp"
+if [ -n "$SERVER" ]; then printf 'MONI_SERVER="%s"\n' "$SERVER" >> "$env_tmp"; fi
+if [ -n "$TOKEN" ]; then printf 'MONI_TOKEN="%s"\n' "$TOKEN" >> "$env_tmp"; fi
+if [ -n "$INTERVAL" ]; then printf 'MONI_INTERVAL=%s\n' "$INTERVAL" >> "$env_tmp"; fi
+printf 'MONI_UPDATE_REPO="%s"\n' "$REPO" >> "$env_tmp"
 chown root:moni "$env_tmp"
 chmod 640 "$env_tmp"
 mv -f "$env_tmp" "$ENV_FILE"

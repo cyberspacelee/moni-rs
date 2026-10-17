@@ -45,7 +45,7 @@ jobs:
           umask 077
           key_file=$(mktemp "$RUNNER_TEMP/moni-signing.XXXXXXXX")
           public_file=$(mktemp "$RUNNER_TEMP/moni-public.XXXXXXXX")
-          trap 'rm -f "$key_file" "$public_file" "$public_file.der" "$public_file.pinned.der"' EXIT
+          trap 'rm -f "$key_file" "$public_file" "$public_file.der" "$public_file.pinned.der" "$public_file.installer.pem"' EXIT
           printf '%s\n' "$AGENT_RELEASE_SIGNING_KEY" > "$key_file"
           openssl rsa -in "$key_file" -passin pass: -pubout -out "$public_file" 2>/dev/null
           key_bits=$(openssl rsa -pubin -in "$public_file" -text -noout 2>/dev/null | sed -n 's/^Public-Key: (\([0-9][0-9]*\) bit)$/\1/p')
@@ -53,6 +53,8 @@ jobs:
           openssl pkey -pubin -in "$public_file" -outform DER -out "$public_file.der"
           openssl pkey -pubin -in scripts/release-public.pem -outform DER -out "$public_file.pinned.der"
           cmp -s "$public_file.der" "$public_file.pinned.der" || { echo 'Signing key does not match scripts/release-public.pem'; exit 1; }
+          sed -n '/^-----BEGIN PUBLIC KEY-----$/,/^-----END PUBLIC KEY-----$/p' scripts/install-agent.sh > "$public_file.installer.pem"
+          cmp -s "$public_file.installer.pem" scripts/release-public.pem || { echo 'Installer trust key does not match scripts/release-public.pem'; exit 1; }
           openssl dgst -sha256 -sign "$key_file" -passin pass: -out dist/SHA256SUMS.sig dist/SHA256SUMS
       - uses: actions/upload-artifact@v5
         with:
