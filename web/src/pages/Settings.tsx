@@ -474,7 +474,7 @@ function AlertsTab() {
       </div>
       <ErrorText>{error}</ErrorText>
       {rules == null ? (
-        <Spinner />
+        !error && <Spinner />
       ) : rules.length === 0 ? (
         <EmptyState title="没有告警规则" />
       ) : (
@@ -574,7 +574,7 @@ function EventsTab() {
         <h2 className="text-sm font-medium">历史事件</h2>
         <ErrorText>{error}</ErrorText>
         {events == null ? (
-          <Spinner />
+          !error && <Spinner />
         ) : events.length === 0 ? (
           <p className="text-sm text-zinc-500">暂无事件。</p>
         ) : (
