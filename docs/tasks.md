@@ -15,8 +15,11 @@
 | F2 | Claude | 总览 + 实时 WS | F1 | ✅ |
 | F3 | Claude | 服务器详情 + 历史图表 | F2, B4 | ✅ |
 | F4 | Claude | 设置：服务器管理 / 告警 / 通知 | F2, B5 | ✅ |
-| R1 | Codex | 完整 code review | 全部 | 🔄 |
-| R2 | Claude | 目标对照验收 | R1 | ☐ |
+| R1 | Codex | 完整 code review | 全部 | ✅ |
+| FIX1 | Codex | 修复 R1 后端问题（R01–R07、R09、R12 + 测试缺口） | R1 | ✅ |
+| FIX2 | Codex | 无请求体写操作 415 回归（浏览器验收发现） | FIX1 | ✅ |
+| FIX3 | Codex | 浏览器冒烟测试接入 e2e / CI | FIX2 | ✅ |
+| R2 | Claude | 目标对照验收（含 R08/R10/R11/R06 前端修复） | R1 | ✅ |
 
 ## B1 协议与 DTO（`crates/protocol`）
 - 按 `docs/design.md` §2 和 `docs/api.md` 实现全部类型，`PROTOCOL_VERSION = 2`。

@@ -85,7 +85,9 @@ try {
   await step("notification test (bodyless POST)", async () => {
     await page.goto(`${base}/#/settings/notify`);
     await page.click("text=发送测试通知");
-    await page.waitForSelector("text=未启用, text=发送成功", { timeout: 10_000 }).catch(() => undefined);
+    // Without notification secrets each channel reports "未启用"; with them, "发送成功" or an error.
+    const result = page.getByText("未启用").or(page.getByText("发送成功")).first();
+    await result.waitFor({ timeout: 10_000 });
   });
 
   await step("delete server (DELETE)", async () => {

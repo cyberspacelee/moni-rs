@@ -50,6 +50,7 @@ jobs:
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
       - run: worker-build --release
         working-directory: crates/worker
-      - run: scripts/e2e.sh --quick
+      - run: npx --prefix web playwright-core install --with-deps chromium
+      - run: scripts/e2e.sh --quick --ui
       - run: sh -n scripts/install-agent.sh
       - run: python3 scripts/test-install-agent.py

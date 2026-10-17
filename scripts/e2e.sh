@@ -5,11 +5,14 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 worker_dir="$repo_dir/crates/worker"
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/moni-e2e.XXXXXXXX")
 quick=false
-case "${1:-}" in
-  --quick) quick=true ;;
-  "") ;;
-  *) echo "Usage: $0 [--quick]" >&2; exit 2 ;;
-esac
+ui=false
+for arg in "$@"; do
+  case "$arg" in
+    --quick) quick=true ;;
+    --ui) ui=true ;;
+    *) echo "Usage: $0 [--quick] [--ui]" >&2; exit 2 ;;
+  esac
+done
 cleanup() {
   local exit_status=$?
   if [[ "${E2E_KEEP:-0}" == 1 || "$exit_status" != 0 ]]; then
@@ -28,7 +31,7 @@ node -e 'if (Number(process.versions.node.split(".")[0]) < 22 || !globalThis.Web
 # Serialize builds, then snapshot their outputs: concurrent runs must not overwrite live Wasm/assets.
 exec 9>"${TMPDIR:-/tmp}/moni-e2e-build-$(id -u).lock"
 flock 9
-(cd web && npm run build) >"$test_dir/web-build.log" 2>&1 || {
+npm --prefix web run build >"$test_dir/web-build.log" 2>&1 || {
   cat "$test_dir/web-build.log" >&2; exit 1;
 }
 cargo run -q -p moni-protocol --example patch-fixture >"$test_dir/patch.json"
@@ -63,14 +66,14 @@ config.vars.AUTH_SECRET = 'e2e-signing-secret-at-least-32-bytes-long';
 fs.writeFileSync(target, JSON.stringify(config));
 JS
 
-node --input-type=module - "$port" "$repo_dir" "$quick" "$test_dir" <<'JS'
+node --input-type=module - "$port" "$repo_dir" "$quick" "$test_dir" "$ui" <<'JS'
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-const [initialPort, repo, quickFlag, temp] = process.argv.slice(2);
+const [initialPort, repo, quickFlag, temp, uiFlag] = process.argv.slice(2);
 let port = initialPort;
 const quick = quickFlag === "true";
 const e2eStartedMs = Date.now();
@@ -79,7 +82,7 @@ let base = `http://127.0.0.1:${port}`;
 const password = 'e2e-admin-password';
 const admin = { Authorization: `Bearer ${password}` };
 const sockets = [];
-let agent, wrangler, webhook;
+let agent, wrangler, webhook, uiSmoke;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const timeout = setTimeout(() => { console.error('e2e timed out'); stopChildren(); process.exit(1); }, 600_000);
 function stopChildren() {
@@ -87,6 +90,7 @@ function stopChildren() {
   webhook?.close();
   agent?.kill('SIGCONT');
   agent?.kill('SIGTERM');
+  uiSmoke?.kill('SIGTERM');
   if (wrangler) { try { process.kill(-wrangler.pid, 'SIGKILL'); } catch {} }
   for (const ws of sockets) if (ws.readyState === 1) ws.close();
 }
@@ -209,6 +213,14 @@ async function rejectedDashboard(headers) {
 }
 try {
   await startWorker();
+  if (uiFlag === 'true') {
+    uiSmoke = spawn('npm', ['--prefix', 'web', 'run', 'test:smoke'], {
+      cwd: repo, env: { ...process.env, MONI_BASE: base, MONI_PASSWORD: password },
+      stdio: 'inherit',
+    });
+    assert.equal((await once(uiSmoke, 'exit'))[0], 0, 'UI smoke failed');
+    uiSmoke = undefined;
+  }
   assert.equal(await (await api('/api/health')).json(), 'ok');
   assert.equal((await (await api('/api/auth/me', 401)).json()).error, 'unauthorized');
   await api('/api/auth/me', 401, { headers: { Authorization: `Bearer ${password}x` } });
