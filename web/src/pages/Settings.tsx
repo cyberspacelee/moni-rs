@@ -89,14 +89,13 @@ function TokenReveal({ config, token }: { config: AppConfig | null; token: strin
           <CopyButton text={token} />
         </div>
       </Field>
-      <Field label="安装命令（在 VPS 上以 root 运行）">
-        <div className="relative">
-          <pre className="overflow-x-auto rounded bg-zinc-100 p-3 pr-16 font-mono text-xs leading-relaxed dark:bg-zinc-800">{cmd}</pre>
-          <div className="absolute top-1.5 right-1.5">
-            <CopyButton text={cmd} />
-          </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">安装命令（在 VPS 上以 root 运行）</span>
+          <CopyButton text={cmd} />
         </div>
-      </Field>
+        <pre className="overflow-x-auto rounded bg-zinc-100 p-3 font-mono text-xs leading-relaxed dark:bg-zinc-800">{cmd}</pre>
+      </div>
       {!config?.agent_release_repo && (
         <p className="text-xs text-zinc-500">未配置 AGENT_RELEASE_REPO，请把命令中的 &lt;owner&gt; 替换为你的 GitHub 仓库。</p>
       )}
@@ -579,7 +578,14 @@ function EventsTab() {
           <p className="text-sm text-zinc-500">暂无事件。</p>
         ) : (
           <Card className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-44" />
+                <col className="w-24" />
+                <col className="w-40" />
+                <col />
+                <col className="w-24" />
+              </colgroup>
               <tbody>
                 {events.map((e) => (
                   <tr key={e.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
@@ -587,8 +593,8 @@ function EventsTab() {
                     <td className="px-4 py-2">
                       {e.kind === "firing" ? <Badge tone="critical">⚠ 触发</Badge> : <Badge tone="good">✓ 恢复</Badge>}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">{e.server_name}</td>
-                    <td className="px-4 py-2">{e.rule_name}</td>
+                    <td className="truncate px-4 py-2">{e.server_name}</td>
+                    <td className="truncate px-4 py-2">{e.rule_name}</td>
                     <td className="tabular px-4 py-2 text-right text-zinc-500">{e.value?.toFixed(1) ?? ""}</td>
                   </tr>
                 ))}
