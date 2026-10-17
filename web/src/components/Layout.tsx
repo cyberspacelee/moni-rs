@@ -30,14 +30,15 @@ function Footer({ version, tabBar }: { version?: string; tabBar: boolean }) {
     // The phone tab bar is fixed; pad the footer so the last line clears it.
     <footer className={cx(tabBar && "pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-0")}>
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6">
-      <div className="flex flex-col gap-2 border-t border-line py-6 text-xs leading-5 text-ink-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Phones centre the two groups, links above the copyright; desktop splits them left / right. */}
+      <div className="flex flex-col-reverse items-center gap-2 border-t border-line pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-xs leading-5 text-ink-3 sm:flex-row sm:justify-between sm:py-6">
         <p className="tabular">
           © {year > SINCE ? `${SINCE}–${year}` : SINCE}{" "}
           <a className={link} href={AUTHOR.url} target="_blank" rel="noreferrer">
             {AUTHOR.name}
           </a>
         </p>
-        <nav aria-label="项目链接" className="flex items-center gap-4">
+        <nav aria-label="项目链接" className="flex items-center gap-5">
           {version && <span className="tabular">v{version}</span>}
           <a className={cx(link, "inline-flex items-center gap-1.5")} href={REPO} target="_blank" rel="noreferrer">
             <IconGitHub size={14} />
