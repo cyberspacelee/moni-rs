@@ -126,9 +126,9 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
           return {
             label: s.label,
             stroke: color,
-            width: 2,
+            width: 1.75,
             paths: spline,
-            fill: i === 0 ? areaFill(color, theme === "dark" ? 0.28 : 0.2) : undefined,
+            fill: i === 0 ? areaFill(color, theme === "dark" ? 0.2 : 0.12) : undefined,
             // A line needs two neighbours; isolated samples would otherwise be invisible.
             points: { show: (u: uPlot) => u.data[0].length < 6, size: 5, fill: color },
             spanGaps: false,
@@ -171,17 +171,17 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
 
   return (
     <Card className="p-4 sm:p-5">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-        <h3 className="flex items-center gap-2 text-sm font-medium whitespace-nowrap">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+        <h3 className="flex h-5 items-center gap-2 text-sm leading-5 font-semibold whitespace-nowrap">
           {icon && <span className="text-ink-3">{icon}</span>}
           {title}
         </h3>
-        <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+        <div className="flex flex-wrap justify-end gap-x-4 gap-y-1">
           {series.map((s) => (
-            <span key={s.label} className="inline-flex items-center gap-1.5 text-xs text-ink-3">
-              <span aria-hidden className="h-0.5 w-3 rounded-full" style={{ background: `var(${s.color})` }} />
+            <span key={s.label} className="inline-flex h-5 items-center gap-1.5 text-xs leading-none text-ink-3">
+              <span aria-hidden className="h-0.5 w-3" style={{ background: `var(${s.color})` }} />
               {s.label}
-              <span className="tabular font-mono text-[11px] text-ink">{(() => {
+              <span className="tabular font-medium text-ink">{(() => {
                 const v = last(s.values);
                 return v == null ? "–" : format(v);
               })()}</span>
@@ -194,23 +194,23 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
         {hover && tipX != null && (
           <div
             role="tooltip"
-            className="pointer-events-none absolute top-1 z-10 min-w-32 rounded-xl border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
+            className="pointer-events-none absolute top-1 z-10 min-w-32 rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-[0_8px_24px_-8px_rgb(0_0_0/0.25)]"
             style={
               flip
                 ? { right: `calc(100% - ${overLeft + hover.left - 12}px)` }
                 : { left: overLeft + hover.left + 12 }
             }
           >
-            <div className="tabular mb-1 font-mono text-[11px] text-ink-3">{tooltipTime(tipX)}</div>
+            <div className="tabular mb-1 text-ink-3">{tooltipTime(tipX)}</div>
             {series.map((s) => {
               const v = s.values[hover.idx];
               return (
                 <div key={s.label} className="flex items-center justify-between gap-4">
                   <span className="inline-flex items-center gap-1.5 text-ink-2">
-                    <span aria-hidden className="size-1.5 rounded-full" style={{ background: `var(${s.color})` }} />
+                    <span aria-hidden className="h-0.5 w-2.5" style={{ background: `var(${s.color})` }} />
                     {s.label}
                   </span>
-                  <span className="tabular font-mono font-medium text-ink">{v == null ? "–" : format(v)}</span>
+                  <span className="tabular font-medium text-ink">{v == null ? "–" : format(v)}</span>
                 </div>
               );
             })}

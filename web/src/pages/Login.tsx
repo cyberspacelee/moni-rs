@@ -36,19 +36,19 @@ export function Login({ onSuccess, canGoBack }: { onSuccess: () => void; canGoBa
       {canGoBack && (
         <a
           href={href({ page: "overview" })}
-          className="absolute top-[max(1rem,env(safe-area-inset-top))] left-4 inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-ink-3 hover:text-ink"
+          className="absolute top-[max(1rem,env(safe-area-inset-top))] left-4 inline-flex h-8 items-center gap-1 rounded-md px-1.5 text-sm leading-none text-ink-2 hover:bg-surface-2 hover:text-ink"
         >
-          <IconBack size={15} />
+          <IconBack size={16} />
           总览
         </a>
       )}
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
-          <Logo className="size-12 drop-shadow-[0_8px_24px_rgb(98_80_214/0.35)]" />
+          <Logo className="size-14" />
           <h1 className="mt-5 text-xl font-semibold tracking-tight">登录 moni</h1>
           <p className="mt-1 text-sm text-ink-3">管理服务器、告警规则与通知</p>
         </div>
-        <form onSubmit={submit} className="space-y-4 rounded-2xl border border-line bg-surface p-5 shadow-[0_12px_40px_-12px_rgb(0_0_0/0.12)] sm:p-6">
+        <form onSubmit={submit} className="space-y-4 rounded-[10px] border border-line bg-surface p-5 sm:p-6">
           <Field label="管理员密码">
             <Input
               type="password"
@@ -60,7 +60,7 @@ export function Login({ onSuccess, canGoBack }: { onSuccess: () => void; canGoBa
           </Field>
           <ErrorText>{error}</ErrorText>
           <Button type="submit" variant="primary" className="h-10 w-full" disabled={busy || !password}>
-            <IconLock size={15} />
+            <IconLock size={16} />
             {busy ? "登录中…" : "登录"}
           </Button>
         </form>

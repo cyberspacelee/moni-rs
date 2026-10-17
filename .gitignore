@@ -9,3 +9,11 @@ crates/worker/build/
 web/dist/*
 !web/dist/.gitkeep
 .codex-runs/
+# impeccable design-skill scratch: decision pages, mocks, build/review captures, per-machine config.
+# PRODUCT.md, DESIGN.md, .impeccable/design.json and .impeccable/surfaces/ are the durable record.
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/build/
+.impeccable/review/
+.impeccable/live/
+.impeccable/config.local.json

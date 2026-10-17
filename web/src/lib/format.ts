@@ -41,3 +41,10 @@ export function ago(ms: number | null | undefined, now = Date.now()): string {
 export function dateTime(ms: number): string {
   return new Date(ms).toLocaleString("zh-CN", { hour12: false });
 }
+
+/** Clock time as a station board prints it; the date joins only when it is not today. */
+export function clockTime(ms: number, now = Date.now()): string {
+  const d = new Date(ms);
+  const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date(now).toDateString() === d.toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}

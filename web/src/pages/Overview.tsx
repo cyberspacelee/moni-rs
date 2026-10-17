@@ -1,101 +1,105 @@
 import { type ReactNode, useState } from "react";
 import type { ServerStatus } from "../api/generated";
 import { Flag, countryName } from "../components/Flag";
-import { IconAlert, IconDown, IconGlobe, IconSearch, IconServer, IconUp } from "../components/icons";
+import { IconAlert, IconDown, IconSearch, IconServer, IconUp } from "../components/icons";
 import { Sparkline } from "../components/Sparkline";
-import { Badge, Card, EmptyState, Meter, PageSpinner, Segmented, StatusDot, cx, levelColor } from "../components/ui";
-import { ago, bytes, duration, pct, rate } from "../lib/format";
+import { StationClock } from "../components/StationClock";
+import { Badge, Card, EmptyState, Meter, PageSpinner, Segmented, StatusDot, levelColor } from "../components/ui";
+import { ago, bytes, clockTime, duration, pct, rate } from "../lib/format";
 import { type RecentPoint, useLive } from "../lib/live";
 import { href } from "../lib/router";
 import { useNow } from "../lib/useNow";
 
-function Stat({ label, icon, children, sub }: { label: string; icon: ReactNode; children: ReactNode; sub?: ReactNode }) {
+/** One reading in the summary strip: hairline-separated, no box, the numeral carries it. */
+function Reading({ label, children, sub }: { label: string; children: ReactNode; sub?: ReactNode }) {
   return (
-    <Card className="px-4 py-3.5 sm:px-5 sm:py-4">
-      <div className="flex items-center gap-1.5 text-xs text-ink-3">
-        <span className="text-ink-3">{icon}</span>
-        {label}
-      </div>
-      <div className="tabular mt-1.5 truncate font-mono text-xl font-semibold tracking-tight sm:text-2xl">{children}</div>
-      {sub && <div className="tabular mt-0.5 truncate text-xs text-ink-3">{sub}</div>}
-    </Card>
+    <div className="min-w-0 bg-surface px-4 py-3 sm:px-5">
+      <div className="text-xs leading-4 text-ink-3">{label}</div>
+      <div className="tabular mt-1 truncate text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">{children}</div>
+      {sub && <div className="tabular mt-0.5 truncate text-xs leading-4 text-ink-3">{sub}</div>}
+    </div>
   );
 }
 
 function hostLine(s: ServerStatus): string {
-  if (!s.host) return s.id;
-  return [s.host.os, s.host.arch, `${s.host.cpu_cores} 核`].filter(Boolean).join(" · ");
+  // The OS string ("Linux (Debian GNU/Linux 13)") would truncate everything after it; detail shows it.
+  return [s.country && countryName(s.country), s.host && `${s.host.cpu_cores} 核`, s.host?.arch].filter(Boolean).join(" · ") || s.id;
 }
 
 function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: readonly RecentPoint[] }) {
   const m = s.metrics;
   const cpu = m?.cpu_pct ?? null;
+  const live = s.online && m != null;
+  const clockLabel = live ? "运行中" : s.last_seen_ms ? `停于 ${clockTime(s.last_seen_ms, now)}` : "从未连接";
   return (
-    <a href={href({ page: "server", id: s.id })} data-server-card className="group block min-w-0 rounded-2xl">
-      <Card
-        className={cx(
-          "h-full overflow-hidden transition-[border-color,box-shadow,transform] duration-200 group-hover:-translate-y-px group-hover:border-line-strong group-hover:shadow-[0_8px_30px_-12px_rgb(0_0_0/0.18)]",
-          !s.online && "opacity-80",
-        )}
-      >
-        <div className="flex items-start gap-3 p-4 pb-0 sm:p-5 sm:pb-0">
-          <Flag code={s.country} className="mt-0.5 text-base" />
+    <a href={href({ page: "server", id: s.id })} data-server-card className="group block min-w-0 rounded-[10px]">
+      <Card className="flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-150 group-hover:border-line-strong group-hover:shadow-[0_6px_20px_-10px_rgb(0_0_0/0.25)]">
+        <div className="flex items-center gap-3 px-4 pt-4 sm:px-5">
+          <StationClock ms={live ? m.ts_ms : s.last_seen_ms} running={live} size={36} label={clockLabel} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate font-medium">{s.name}</span>
+            <div className="flex h-5 items-center gap-2">
+              <span className="truncate leading-5 font-semibold">{s.name}</span>
               {s.alerts_firing > 0 && (
                 <Badge tone="critical">
-                  <IconAlert size={11} />
+                  <IconAlert size={12} />
                   {s.alerts_firing}
                 </Badge>
               )}
             </div>
-            <div className="truncate text-xs text-ink-3">
-              {s.country && <span>{countryName(s.country)} · </span>}
-              {hostLine(s)}
+            <div className="mt-0.5 flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3">
+              {s.country && <Flag code={s.country} className="text-[13px]" />}
+              <span className="truncate">{hostLine(s)}</span>
             </div>
           </div>
           <StatusDot online={s.online} />
         </div>
 
-        {s.online && m ? (
+        {live ? (
           <>
-            <div className="relative mt-3 h-14 px-0">
-              <div className="absolute top-0 left-4 z-10 sm:left-5">
-                <div className="tabular font-mono text-2xl leading-none font-semibold tracking-tight">
+            <div className="mt-3 flex items-end gap-3 px-4 sm:px-5">
+              <div className="shrink-0">
+                <div className="tabular text-3xl leading-8 font-semibold tracking-tight">
                   {cpu == null ? "–" : cpu.toFixed(0)}
-                  <span className="ml-0.5 text-sm font-normal text-ink-3">%</span>
+                  <span className="ml-0.5 text-base font-normal text-ink-3">%</span>
                 </div>
-                <div className="mt-1 text-[11px] text-ink-3">CPU · load {m.load1.toFixed(2)}</div>
+                <div className="mt-1 text-xs leading-4 text-ink-3">CPU · 负载 {m.load1.toFixed(2)}</div>
               </div>
-              <div className="absolute inset-x-0 bottom-0 h-11">
+              <div className="h-12 min-w-0 flex-1">
                 <Sparkline values={recent.map((p) => p.cpu)} color={levelColor(cpu)} />
               </div>
             </div>
-            <div className="space-y-3 border-t border-line px-4 pt-3.5 pb-4 sm:px-5">
+            <div className="mt-4 space-y-3 border-t border-line px-4 pt-3.5 pb-4 sm:px-5">
               <Meter label="内存" value={pct(m.mem_used, m.mem_total)} detail={`${bytes(m.mem_used)} / ${bytes(m.mem_total, 0)}`} />
               <Meter label="磁盘" value={pct(m.disk_used, m.disk_total)} detail={`${bytes(m.disk_used, 0)} / ${bytes(m.disk_total, 0)}`} />
-              <div className="tabular grid grid-cols-2 gap-2 pt-0.5 font-mono text-[11px]">
-                <div className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2 py-1.5">
-                  <IconDown size={12} className="text-[var(--series-1)]" />
-                  <span className="truncate">{rate(m.net_rx_bps)}</span>
+              <div className="tabular grid grid-cols-2 gap-x-4 border-t border-line pt-3 text-xs leading-4">
+                <div className="flex items-center gap-1.5">
+                  <IconDown size={14} className="shrink-0 text-[var(--series-1)]" />
+                  <span className="text-ink-3">下行</span>
+                  <span className="ml-auto truncate font-medium">{rate(m.net_rx_bps)}</span>
                 </div>
-                <div className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2 py-1.5">
-                  <IconUp size={12} className="text-[var(--series-2)]" />
-                  <span className="truncate">{rate(m.net_tx_bps)}</span>
+                <div className="flex items-center gap-1.5">
+                  <IconUp size={14} className="shrink-0 text-[var(--series-2)]" />
+                  <span className="text-ink-3">上行</span>
+                  <span className="ml-auto truncate font-medium">{rate(m.net_tx_bps)}</span>
                 </div>
               </div>
-              <div className="flex justify-between gap-2 text-[11px] text-ink-3">
+              <div className="tabular flex justify-between gap-2 text-xs leading-4 text-ink-3">
                 <span className="truncate">
-                  本月 ↓{bytes(s.traffic_month.rx_bytes)} ↑{bytes(s.traffic_month.tx_bytes)}
+                  本月 ↓ {bytes(s.traffic_month.rx_bytes)} · ↑ {bytes(s.traffic_month.tx_bytes)}
                 </span>
                 <span className="shrink-0">运行 {duration(m.uptime_s)}</span>
               </div>
             </div>
           </>
         ) : (
-          <div className="px-4 pt-6 pb-5 text-sm text-ink-3 sm:px-5">
-            {s.online ? "等待数据…" : s.last_seen_ms ? `最后在线 ${ago(s.last_seen_ms, now)}` : "Agent 尚未连接"}
+          // A stopped clock keeps its place on the board: the card stays, stamped with when it stopped.
+          <div className="mt-4 border-t border-dashed border-line-strong px-4 pt-3.5 pb-4 sm:px-5">
+            <div className="tabular text-xl leading-7 font-semibold tracking-tight text-ink-2">
+              {s.online ? "等待数据…" : s.last_seen_ms ? `停于 ${clockTime(s.last_seen_ms, now)}` : "尚未接入"}
+            </div>
+            <div className="mt-1 text-xs leading-4 text-ink-3">
+              {s.online ? "Agent 已连接，首帧即将到达" : s.last_seen_ms ? `${ago(s.last_seen_ms, now)}失去心跳` : "在 VPS 上运行安装命令后，这只钟会开始走"}
+            </div>
           </div>
         )}
       </Card>
@@ -131,42 +135,37 @@ export function Overview({ admin }: { admin: boolean }) {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-        <Stat label="在线" icon={<IconServer size={14} />} sub={`共 ${list.length} 台`}>
+      {/* 1px gaps over a line-coloured ground draw the hairlines between readings at any column count. */}
+      <section
+        aria-label="汇总"
+        className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-line bg-line lg:grid-cols-4">
+        <Reading label="在线" sub={list.length - online.length ? `${list.length - online.length} 台停走` : "全部在走"}>
           {online.length}
-          <span className="text-base font-normal text-ink-3">/{list.length}</span>
-        </Stat>
-        <Stat
-          label="实时带宽"
-          icon={<IconDown size={14} />}
-          sub={
-            <span className="inline-flex items-center gap-1">
-              <IconUp size={11} /> {rate(tx)}
-            </span>
-          }
-        >
+          <span className="text-base font-normal text-ink-3"> / {list.length}</span>
+        </Reading>
+        <Reading label="实时带宽 ↓" sub={`↑ ${rate(tx)}`}>
           {rate(rx)}
-        </Stat>
-        <Stat label="本月流量" icon={<IconGlobe size={14} />} sub="入站 + 出站">
+        </Reading>
+        <Reading label="本月流量" sub="入站 + 出站">
           {bytes(month)}
-        </Stat>
+        </Reading>
         {admin ? (
-          <Stat label="告警中" icon={<IconAlert size={14} />} sub={alerts.length ? "查看管理 → 告警事件" : "一切正常"}>
+          <Reading label="告警" sub={alerts.length ? "管理 → 告警事件" : "一切正常"}>
             <span className={alerts.length ? "text-crit" : undefined}>{alerts.length}</span>
-          </Stat>
+          </Reading>
         ) : (
-          <Stat label="覆盖地区" icon={<IconGlobe size={14} />} sub={`${list.length} 台服务器`}>
+          <Reading label="地区" sub={`${list.length} 台服务器`}>
             {regions}
-          </Stat>
+          </Reading>
         )}
-      </div>
+      </section>
 
       {list.length === 0 ? (
         <EmptyState title="还没有服务器" icon={<IconServer size={18} />}>
           {admin ? (
             <>
               前往{" "}
-              <a className="text-brand underline-offset-2 hover:underline" href={href({ page: "settings", tab: "servers" })}>
+              <a className="font-medium text-ink underline underline-offset-2" href={href({ page: "settings", tab: "servers" })}>
                 管理 → 服务器
               </a>{" "}
               添加第一台，并在 VPS 上运行安装命令。
@@ -179,14 +178,14 @@ export function Overview({ admin }: { admin: boolean }) {
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <label className="relative block sm:w-72">
-              <IconSearch size={15} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-3" />
+              <IconSearch size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-3" />
               <span className="sr-only">搜索服务器</span>
               <input
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜索名称或地区"
-                className="h-10 w-full rounded-xl border border-line bg-surface pr-3 pl-9 text-sm shadow-xs placeholder:text-ink-3 focus:border-brand focus:ring-3 focus:ring-brand/15 focus:outline-none sm:h-9"
+                className="h-10 w-full rounded-md border border-line bg-surface pr-3 pl-9 text-sm placeholder:text-ink-3 focus:border-ink-3 focus:ring-3 focus:ring-ink/8 focus:outline-none sm:h-9"
               />
             </label>
             <Segmented
