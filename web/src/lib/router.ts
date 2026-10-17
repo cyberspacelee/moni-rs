@@ -35,10 +35,11 @@ const subscribe = (cb: () => void) => {
   return () => window.removeEventListener("hashchange", cb);
 };
 
-let cachedHash = "";
+// useSyncExternalStore needs a stable snapshot: only re-parse when the hash actually changes.
+let cachedHash: string | null = null;
 let cachedRoute: Route = { page: "overview" };
 function snapshot(): Route {
-  if (location.hash !== cachedHash || cachedHash === "") {
+  if (location.hash !== cachedHash) {
     cachedHash = location.hash;
     cachedRoute = parse(cachedHash);
   }

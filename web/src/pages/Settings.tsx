@@ -205,7 +205,7 @@ function ServersTab({ config }: { config: AppConfig | null }) {
                   <td className="px-4 py-2.5 font-mono text-xs text-zinc-500">{s.id}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <StatusDot online={s.online} />
-                    {!s.online && <span className="ml-2 text-xs text-zinc-500">{ago(s.last_seen_ms, now)}</span>}
+                    {!s.online && <span className="ml-2 text-xs text-zinc-500">{s.last_seen_ms ? ago(s.last_seen_ms, now) : "未连接过"}</span>}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-zinc-500">{s.agent_version ?? "–"}</td>
                   <td className="px-4 py-2.5">
