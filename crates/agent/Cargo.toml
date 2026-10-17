@@ -12,7 +12,10 @@ clap = { version = "4", features = ["derive", "env"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sysinfo = { version = "0.38", default-features = false, features = ["system", "disk", "network"] }
-tokio = { version = "1", features = ["rt", "macros", "time", "signal"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "signal", "sync", "net"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "io-util"] }
