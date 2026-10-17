@@ -8,3 +8,4 @@ crates/worker/build/
 !crates/worker/.dev.vars.example
 web/dist/*
 !web/dist/.gitkeep
+.codex-runs/
