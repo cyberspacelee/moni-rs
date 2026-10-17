@@ -36,13 +36,18 @@ impl Hub {
     }
 
     fn status(&self, row: ServerRow) -> Result<ServerStatus> {
-        let live = self
-            .state
-            .get_websockets_with_tag(&super::tag_for(&row.id))
-            .iter()
-            .filter_map(agent_conn)
-            .find(|c| !c.closing);
-        let traffic_month = self.traffic_month(&row.id)?;
+        let mut live = None;
+        for ws in self.state.get_websockets_with_tag(&super::tag_for(&row.id)) {
+            if let Some(mut conn) = agent_conn(&ws).filter(|c| !c.closing) {
+                self.refresh_traffic(&ws, &mut conn)?;
+                live = Some(conn);
+                break;
+            }
+        }
+        let traffic_month = live
+            .as_ref()
+            .and_then(|c| c.traffic_month.clone())
+            .unwrap_or_else(|| self.safe_traffic_month(&row.id));
         let alerts_firing = self.firing_count(&row.id)?;
         Ok(ServerStatus {
             id: row.id,
@@ -55,7 +60,7 @@ impl Hub {
                 .host_json
                 .and_then(|json| serde_json::from_str::<HostInfo>(&json).ok()),
             metrics: live.and_then(|c| c.latest),
-            traffic_month,
+            traffic_month: traffic_month.into(),
             alerts_firing,
         })
     }
@@ -176,8 +181,15 @@ impl Hub {
         }
         self.revoke_connections(id)?;
         let sql = self.state.storage().sql();
-        self.resolve_server_alerts(id, false)?;
-        for table in ["alert_rules", "metrics_1m", "metrics_1h", "dirty_hours"] {
+        for table in [
+            "alert_rules",
+            "alert_state",
+            "alert_events",
+            "notification_queue",
+            "metrics_1m",
+            "metrics_1h",
+            "dirty_hours",
+        ] {
             sql.exec(
                 &format!("DELETE FROM {table} WHERE server_id = ?"),
                 vec![id.into()],

@@ -194,7 +194,10 @@ where
                 }
             }
             _ = state.ready.notified() => { send_pending(socket, state).await?; }
-            _ = ping.tick() => { send(socket, Message::Ping(Default::default())).await?; }
+            _ = ping.tick() => {
+                send(socket, Message::Ping(Default::default())).await?;
+                send_pending(socket, state).await?;
+            }
             message = receive(socket) => match message? {
                 HubMessage::Ack { minute_ms } => state.queue.borrow_mut().ack(minute_ms),
                 HubMessage::Welcome { .. } => return Err(End::Retry("unexpected duplicate Welcome")),

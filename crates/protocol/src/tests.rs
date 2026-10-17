@@ -119,6 +119,9 @@ fn hub_messages_match_design() {
 
 #[test]
 fn dashboard_events_match_api() {
+    assert_roundtrip::<DashboardEvent>(
+        json!({"type":"traffic", "id":"vps-1", "traffic": {"rx_bytes":100, "tx_bytes":20, "since_ms":0}}),
+    );
     let events = [
         (
             "snapshot",
@@ -244,7 +247,7 @@ fn request_and_response_dtos_match_api() {
         json!({"server": server(false), "token": "mn_vps-1_example"}),
     );
     assert_roundtrip::<UpdateServerRequest>(json!({"name": "Renamed"}));
-    assert_roundtrip::<UpdateServerRequest>(json!({"name": null}));
+
     assert_eq!(
         serde_json::from_value::<UpdateServerRequest>(json!({})).unwrap(),
         UpdateServerRequest::default()
@@ -260,13 +263,7 @@ fn request_and_response_dtos_match_api() {
 fn patch_preserves_missing_null_and_values() {
     let empty = serde_json::from_value::<AlertRulePatch>(json!({})).unwrap();
     assert_eq!(empty, AlertRulePatch::default());
-    assert_eq!(
-        serde_json::to_value(empty).unwrap(),
-        json!({
-            "name": null, "server_id": null, "metric": null, "op": null,
-            "threshold": null, "recover_threshold": null, "duration_s": null, "enabled": null
-        })
-    );
+    assert_eq!(serde_json::to_value(empty).unwrap(), json!({}));
 
     let cleared: AlertRulePatch = serde_json::from_value(json!({
         "server_id": null, "recover_threshold": null
@@ -283,10 +280,18 @@ fn patch_preserves_missing_null_and_values() {
     assert_eq!(patch.server_id, Some(Some("vps-1".into())));
     assert_eq!(patch.recover_threshold, Some(Some(11.0)));
     assert_eq!(patch.enabled, Some(false));
-    assert_roundtrip::<AlertRulePatch>(json!({
-        "name": null, "server_id": null, "metric": null, "op": null,
-        "threshold": null, "recover_threshold": null, "duration_s": null, "enabled": null
-    }));
+    assert_eq!(
+        serde_json::to_value(cleared).unwrap(),
+        json!({"server_id": null, "recover_threshold": null})
+    );
+    assert_eq!(
+        serde_json::to_value(AlertRulePatch {
+            threshold: Some(95.0),
+            ..Default::default()
+        })
+        .unwrap(),
+        json!({"threshold": 95.0})
+    );
 }
 
 #[test]

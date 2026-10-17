@@ -116,9 +116,55 @@ pub fn slug(name: &str) -> String {
     }
 }
 
+#[derive(Default)]
+pub struct LoginFailures {
+    by_ip: std::collections::HashMap<String, (i64, u8)>,
+}
+
+impl LoginFailures {
+    pub fn limited(&mut self, ip: &str, now: i64, failed: bool) -> bool {
+        self.by_ip.retain(|_, (start, _)| now - *start < 60_000);
+        if self.by_ip.get(ip).is_some_and(|(_, count)| *count >= 10) {
+            return true;
+        }
+        if failed {
+            let (_, count) = self.by_ip.entry(ip.into()).or_insert((now, 0));
+            *count += 1;
+        }
+        false
+    }
+}
+
+pub fn origin_allowed(origin: Option<&str>, target: &str, required: bool) -> bool {
+    match origin {
+        Some(value) => value != "null" && value == target,
+        None => !required,
+    }
+}
+
+pub fn json_content_type(value: Option<&str>) -> bool {
+    value
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"))
+}
+
+pub fn valid_rollup(r: &moni_protocol::MinuteRollup) -> bool {
+    r.rx_bytes <= 1 << 50
+        && r.tx_bytes <= 1 << 50
+        && r.rx_bps_max <= 1 << 47
+        && r.tx_bps_max <= 1 << 47
+        && (0.0..=100.0).contains(&r.cpu_avg)
+        && (0.0..=100.0).contains(&r.cpu_max)
+        && r.mem_used_avg <= r.mem_total
+        && r.swap_used_avg <= r.swap_total
+        && r.disk_used <= r.disk_total
+        && r.load1_avg.is_finite()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use moni_protocol::MinuteRollup;
 
     #[test]
     fn ranges_match_the_api_and_reject_unknown_values() -> Result<(), &'static str> {
@@ -218,5 +264,82 @@ mod tests {
             assert!(safe.contains("unknown variant"));
         }
         Ok(())
+    }
+
+    #[test]
+    fn failed_logins_are_limited_per_ip_and_expire() {
+        let mut failures = LoginFailures::default();
+        for _ in 0..10 {
+            assert!(!failures.limited("one", 1000, true));
+        }
+        assert!(failures.limited("one", 1001, false));
+        assert!(!failures.limited("two", 1001, true));
+        assert!(!failures.limited("one", 61_000, true));
+    }
+
+    #[test]
+    fn csrf_and_json_media_types() {
+        let target = "https://moni.example.com";
+        assert!(origin_allowed(Some(target), target, true));
+        for origin in [
+            None,
+            Some("null"),
+            Some("https://evil.example.com"),
+            Some("http://moni.example.com"),
+            Some("https://moni.example.com:444"),
+        ] {
+            assert!(!origin_allowed(origin, target, true));
+        }
+        assert!(origin_allowed(None, target, false));
+        assert!(json_content_type(Some("Application/JSON; charset=utf-8")));
+        for value in [None, Some("text/plain"), Some("application/jsonp")] {
+            assert!(!json_content_type(value));
+        }
+    }
+
+    #[test]
+    fn rollup_numeric_limits() {
+        let valid = MinuteRollup {
+            rx_bytes: 1 << 50,
+            tx_bytes: 1 << 50,
+            rx_bps_max: 1 << 47,
+            tx_bps_max: 1 << 47,
+            cpu_avg: 100.0,
+            cpu_max: 100.0,
+            ..Default::default()
+        };
+        assert!(valid_rollup(&valid));
+        for bad in [
+            MinuteRollup {
+                rx_bytes: (1 << 50) + 1,
+                ..valid.clone()
+            },
+            MinuteRollup {
+                tx_bps_max: (1 << 47) + 1,
+                ..valid.clone()
+            },
+            MinuteRollup {
+                cpu_avg: -1.0,
+                ..valid.clone()
+            },
+            MinuteRollup {
+                cpu_max: 100.1,
+                ..valid.clone()
+            },
+            MinuteRollup {
+                load1_avg: f32::INFINITY,
+                ..valid.clone()
+            },
+            MinuteRollup {
+                cpu_avg: f32::NAN,
+                ..valid.clone()
+            },
+            MinuteRollup {
+                mem_used_avg: 1,
+                ..valid.clone()
+            },
+        ] {
+            assert!(!valid_rollup(&bad));
+        }
     }
 }

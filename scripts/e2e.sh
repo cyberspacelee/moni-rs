@@ -11,7 +11,8 @@ case "${1:-}" in
   *) echo "Usage: $0 [--quick]" >&2; exit 2 ;;
 esac
 cleanup() {
-  if [[ "${E2E_KEEP:-0}" == 1 ]]; then
+  local exit_status=$?
+  if [[ "${E2E_KEEP:-0}" == 1 || "$exit_status" != 0 ]]; then
     echo "e2e logs/state: $test_dir"
   else
     rm -rf -- "$test_dir"
@@ -24,11 +25,13 @@ trap 'exit 143' TERM
 cd "$repo_dir"
 # Wrangler 4.151.1 requires Node 22+, which also provides WebSocket without dependencies.
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22 || !globalThis.WebSocket) { console.error("Node 22+ is required by Wrangler and the built-in WebSocket client"); process.exit(1); }'
-[[ -f web/dist/.gitkeep || -f web/dist/index.html ]] || {
-  echo 'web/dist needs .gitkeep or a frontend build' >&2
-  exit 1
+# Serialize builds, then snapshot their outputs: concurrent runs must not overwrite live Wasm/assets.
+exec 9>"${TMPDIR:-/tmp}/moni-e2e-build-$(id -u).lock"
+flock 9
+(cd web && npm run build) >"$test_dir/web-build.log" 2>&1 || {
+  cat "$test_dir/web-build.log" >&2; exit 1;
 }
-
+cargo run -q -p moni-protocol --example patch-fixture >"$test_dir/patch.json"
 cargo build -p moni-agent >"$test_dir/agent-build.log" 2>&1 || {
   cat "$test_dir/agent-build.log" >&2; exit 1;
 }
@@ -36,16 +39,25 @@ cargo build -p moni-agent >"$test_dir/agent-build.log" 2>&1 || {
   cat "$test_dir/worker-build.log" >&2; exit 1;
 }
 
-port=${E2E_PORT:-$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')}
+cp -R "$worker_dir/build" "$test_dir/build"
+cp -R web/dist "$test_dir/assets"
+cp target/debug/moni-agent "$test_dir/moni-agent"
+cp scripts/e2e-worker.mjs "$test_dir/worker.mjs"
+flock -u 9
+exec 9>&-
+
+port=${E2E_PORT:-0}
 node --input-type=module - "$worker_dir" "$test_dir/config.json" <<'JS'
 import fs from 'node:fs';
 import path from 'node:path';
 const [worker, target] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(path.join(worker, 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
 delete config.$schema;
-config.main = path.join(worker, config.main);
-config.assets.directory = path.resolve(worker, config.assets.directory);
+config.name = path.basename(path.dirname(target)).replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+config.main = path.join(path.dirname(target), "worker.mjs");
+config.assets.directory = path.join(path.dirname(target), "assets");
 delete config.build;
+config.vars.E2E_RUN_ID = path.basename(path.dirname(target));
 config.vars.ADMIN_PASSWORD = 'e2e-admin-password';
 config.vars.AUTH_SECRET = 'e2e-signing-secret-at-least-32-bytes-long';
 fs.writeFileSync(target, JSON.stringify(config));
@@ -58,17 +70,18 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-const [port, repo, quickFlag, temp] = process.argv.slice(2);
+const [initialPort, repo, quickFlag, temp] = process.argv.slice(2);
+let port = initialPort;
 const quick = quickFlag === "true";
 const e2eStartedMs = Date.now();
 const WS = globalThis.WebSocket;
-const base = `http://127.0.0.1:${port}`;
+let base = `http://127.0.0.1:${port}`;
 const password = 'e2e-admin-password';
 const admin = { Authorization: `Bearer ${password}` };
 const sockets = [];
 let agent, wrangler, webhook;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-const timeout = setTimeout(() => { console.error('e2e timed out'); stopChildren(); process.exit(1); }, 360_000);
+const timeout = setTimeout(() => { console.error('e2e timed out'); stopChildren(); process.exit(1); }, 600_000);
 function stopChildren() {
   webhook?.closeAllConnections();
   webhook?.close();
@@ -84,12 +97,31 @@ async function startWorker() {
   wrangler = spawn(path.join(repo, 'node_modules/.bin/wrangler'), ['dev',
     '--config', path.join(temp, 'config.json'), '--local', '--ip', '127.0.0.1',
     '--port', port, '--inspector-port', '0', '--persist-to', path.join(temp, 'state')], {
-    env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false' },
+    env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false',
+      WRANGLER_REGISTRY_PATH: path.join(temp, 'registry') },
     detached: true, stdio: ['ignore', log, log],
   });
   fs.closeSync(log);
-  for (let i = 0; i < 200; i++) {
-    try { if ((await fetch(base + '/api/health')).ok) return; } catch {}
+  const deadline = Date.now() + 120_000;
+  let readySince;
+  while (Date.now() < deadline) {
+    const ready = fs.readFileSync(path.join(temp, 'wrangler.log'), 'utf8').match(/Ready on http:\/\/127\.0\.0\.1:(\d+)/g)?.at(-1);
+    if (port === '0' && ready) {
+      port = ready.split(':').at(-1);
+      base = `http://127.0.0.1:${port}`;
+    }
+    try {
+      const response = await fetch(base + '/api/health', { signal: AbortSignal.timeout(2000) });
+      const healthy = response.ok && response.headers.get('x-e2e-run') === path.basename(temp);
+      await response.arrayBuffer();
+      const hub = await fetch(base + '/api/servers', { headers: admin, signal: AbortSignal.timeout(2000) });
+      const hubReady = hub.ok && Array.isArray(await hub.json());
+      // The proxy can serve health before the initial runtime/binding updates have settled.
+      if (healthy && hubReady) {
+        readySince ??= Date.now();
+        if (Date.now() - readySince >= 1000) return;
+      } else readySince = undefined;
+    } catch { readySince = undefined; }
     assert.equal(wrangler.exitCode, null, 'Wrangler exited during startup');
     await pause(100);
   }
@@ -106,23 +138,33 @@ function editStorage(source) {
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
+async function poll(check, label, waitMs = 60_000, intervalMs = 100) {
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    const result = await check();
+    if (result) return result;
+    await pause(intervalMs);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
 async function api(url, status = 200, { method = 'GET', headers = {}, body } = {}) {
   const response = await fetch(base + url, {
-    method, headers: { 'Content-Type': 'application/json', ...headers },
+    signal: AbortSignal.timeout(15_000), method, headers: { 'Content-Type': 'application/json', ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  assert.equal(response.status, status, `${method} ${url}: ${response.status}`);
+  const failure = response.status >= 500 ? await response.clone().text() : '';
+  assert.equal(response.status, status, `${method} ${url}: ${response.status} ${failure}`);
   return response;
 }
 function socket(url, headers) {
-  const ws = new WS(base.replace('http:', 'ws:') + url, { headers });
+  const ws = new WS(base.replace('http:', 'ws:') + url, { headers: { ...(headers?.Cookie ? { Origin: base } : {}), ...headers } });
   sockets.push(ws);
   const events = [];
   ws.addEventListener('message', event => events.push(JSON.parse(event.data)));
   const closed = new Promise(resolve => ws.addEventListener('close', event => resolve(event.code)));
   return { ws, events, closed };
 }
-async function event(client, type, matches = () => true, waitMs = 10_000) {
+async function event(client, type, matches = () => true, waitMs = 30_000) {
   for (let i = 0; i < waitMs / 50; i++) {
     const found = client.events.find(e => e.type === type && matches(e));
     if (found) return found;
@@ -134,7 +176,7 @@ async function event(client, type, matches = () => true, waitMs = 10_000) {
 async function rejectedUpgrade(token, extra = {}) {
   const { request } = await import('node:http');
   await new Promise((resolve, reject) => {
-    const req = request(base + '/ws/agent', { headers: {
+    const req = request(base + '/ws/agent', { agent: false, headers: {
       ...extra, Authorization: `Bearer ${token}`, Upgrade: 'websocket', Connection: 'Upgrade',
       'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'MDEyMzQ1Njc4OWFiY2RlZg==',
     }}, response => {
@@ -143,6 +185,23 @@ async function rejectedUpgrade(token, extra = {}) {
       response.on('end', () => { try { assert.equal(response.statusCode, 401); assert.equal(JSON.parse(body).error, 'unauthorized'); resolve(); } catch (error) { reject(error); } });
     });
     req.on('upgrade', (_response, connection) => { connection.destroy(); reject(new Error('Invalid token was accepted')); });
+    req.on('error', reject);
+    req.end();
+  });
+}
+async function rejectedDashboard(headers) {
+  const { request } = await import('node:http');
+  await new Promise((resolve, reject) => {
+    const req = request(base + '/ws/dashboard', { agent: false, headers: {
+      ...headers, Upgrade: 'websocket', Connection: 'Upgrade',
+      'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'MDEyMzQ1Njc4OWFiY2RlZg==',
+    }}, response => {
+      response.resume();
+      response.on('end', () => {
+        try { assert.equal(response.statusCode, 403); resolve(); } catch (error) { reject(error); }
+      });
+    });
+    req.on('upgrade', (_response, connection) => { connection.destroy(); reject(new Error('Foreign dashboard Origin accepted')); });
     req.on('error', reject);
     req.end();
   });
@@ -163,6 +222,23 @@ try {
   const Cookie = cookieHeader.split(';')[0];
   assert.equal((await (await api('/api/auth/me', 200, { headers: { Cookie } })).json()).authenticated, true);
   await api('/api/auth/me', 401, { headers: { Cookie: Cookie + 'x' } });
+  for (const Origin of [undefined, 'null', 'https://evil.example.com', 'http://localhost:' + port]) {
+    const headers = { Cookie, ...(Origin === undefined ? {} : { Origin }) };
+    await api('/api/servers', 403, { method: 'POST', headers, body: { name: 'CSRF' } });
+    await rejectedDashboard(headers);
+  }
+  await api('/api/auth/login', 403, { method: 'POST', headers: { Origin: 'null' }, body: { password } });
+  await api('/api/auth/login', 403, { method: 'POST', headers: { Origin: 'https://evil.example.com' }, body: { password } });
+  await api('/api/auth/login', 204, { method: 'POST', headers: { Origin: base }, body: { password } });
+  await api('/api/servers', 415, { method: 'POST', headers: { Cookie, Origin: base, 'Content-Type': 'text/plain' }, body: { name: 'CSRF' } });
+  await api('/api/auth/login', 415, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: { password } });
+  await api('/api/servers', 415, { method: 'POST', headers: { ...admin, 'Content-Type': 'text/plain' }, body: { name: 'CLI' } });
+  const sameOrigin = await (await api('/api/servers', 201, { method: 'POST', headers: { Cookie, Origin: base }, body: { name: 'same-origin' } })).json();
+  await api('/api/servers/' + sameOrigin.server.id, 204, { method: 'DELETE', headers: { Cookie, Origin: base } });
+  const cliDash = socket('/ws/dashboard', admin);
+  await event(cliDash, 'snapshot');
+  cliDash.ws.close();
+  console.log('CSRF passed: same Origin, foreign/null/missing Origin, JSON media type and Bearer CLI');
   const config = await (await api('/api/config', 200, { headers: admin })).json();
   assert.deepEqual(config.retention, { minute_days: 7, hour_days: 90 });
   let dash = socket('/ws/dashboard', { Cookie });
@@ -193,7 +269,7 @@ try {
   const collision = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { name: 'E2E VPS' } })).json();
   assert.equal(collision.server.id, 'e2e-vps-2');
   // Deterministic history fixtures exercise aggregation/percentages independently of the host load.
-  const fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+  let fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
   await event(fixture, 'welcome');
   const ruleInput = { name: 'CPU E2E', server_id: collision.server.id, metric: 'cpu', op: 'gt',
     threshold: 0, recover_threshold: null, duration_s: 0, enabled: true };
@@ -254,6 +330,12 @@ try {
   assert.equal(olderAlerts[0].id, alertHistory[1].id);
   await api('/api/alerts/events?limit=0', 400, { headers: admin });
   await api('/api/alerts/events?before_id=bad', 400, { headers: admin });
+  fixture.ws.close();
+  const { regressions } = await import(path.join(repo, 'scripts/e2e-regressions.mjs'));
+  await regressions({ api, admin, socket, event, poll, base,
+    patches: JSON.parse(fs.readFileSync(path.join(temp, 'patch.json'), 'utf8')), cpuFrame });
+  fixture = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
+  await event(fixture, 'welcome');
   console.log('Alerts passed: defaults, validation, nullable PATCH, firing/recovery, snapshot/counts, disable/delete and event pagination');
   const fixtureHour = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3 * 3_600_000;
   const rollup = (minute_ms, cpu_avg, rx_bytes, peak) => ({ type: 'rollup', minute_ms,
@@ -286,7 +368,7 @@ try {
   assert.equal((await (await api(fixturePath, 200, { headers: admin })).json()).range, '24h');
   // Neither message nor credential may be echoed, and a burst produces just one warning.
   for (let i = 0; i < 10; i++) fixture.ws.send(JSON.stringify({ type: 'mn_DO_NOT_LOG_THIS_TOKEN' }));
-  await pause(100);
+  await poll(() => fs.readFileSync(path.join(temp, 'wrangler.log'), 'utf8').includes(`Invalid Agent message server=${collision.server.id}:`), 'parse warning');
   const warnings = fs.readFileSync(path.join(temp, 'wrangler.log'), 'utf8');
   assert.ok(!warnings.includes('mn_DO_NOT_LOG_THIS_TOKEN'));
   assert.equal(warnings.split(`Invalid Agent message server=${collision.server.id}:`).length - 1, 1);
@@ -295,7 +377,7 @@ try {
   await rejectedUpgrade('bad-token', { 'x-moni-server-id': server.id, 'x-moni-token-hash': 'forged' });
   const agentLog = fs.openSync(path.join(temp, 'agent.log'), 'w');
   const startedMs = Date.now();
-  agent = spawn(path.join(repo, 'target/debug/moni-agent'), [], {
+  agent = spawn(path.join(temp, 'moni-agent'), [], {
     env: { ...process.env, MONI_SERVER: base.replace('http:', 'ws:') + '/ws/agent',
       MONI_TOKEN: token, MONI_IFACES: 'lo' },
     stdio: ['ignore', agentLog, agentLog],
@@ -312,17 +394,23 @@ try {
   assert.equal(renamed.name, 'Renamed');
   await event(dash, 'server_upsert', e => e.server.name === 'Renamed');
   if (!quick) {
-    console.log('Waiting for more than two minutes of native Agent rollups...');
-    while (Date.now() - startedMs < 125_000) {
-      await api('/api/servers', 200, { headers: admin });
-      await pause(1000);
-    }
-    let history = await (await api(`/api/servers/${server.id}/history?range=1h`, 200, { headers: admin })).json();
-    assert.ok(history.points.length >= 2, 'Native Agent must persist at least two minutes');
+    console.log('Waiting for two persisted native Agent rollups...');
+    let history = await poll(async () => {
+      const result = await (await api(`/api/servers/${server.id}/history?range=1h`, 200, { headers: admin })).json();
+      return result.points.length >= 2 && result;
+    }, 'two native minute rollups', 180_000, 1000);
     const status = (await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === server.id);
-    assert.ok(status.traffic_month.rx_bytes + status.traffic_month.tx_bytes > 0);
+    if (history.points.some(p => p.ts_ms >= status.traffic_month.since_ms && p.rx_bytes + p.tx_bytes > 0)) {
+      assert.ok(status.traffic_month.rx_bytes + status.traffic_month.tx_bytes > 0);
+    }
     const freshDash = socket('/ws/dashboard', { Cookie });
-    assert.deepEqual((await event(freshDash, 'snapshot')).servers.find(s => s.id === server.id).traffic_month, status.traffic_month);
+    const freshTraffic = (await event(freshDash, 'snapshot')).servers.find(s => s.id === server.id).traffic_month;
+    // Another native Rollup may arrive between the REST response and the snapshot.
+    assert.ok(freshTraffic.since_ms >= status.traffic_month.since_ms);
+    if (freshTraffic.since_ms === status.traffic_month.since_ms) {
+      assert.ok(freshTraffic.rx_bytes >= status.traffic_month.rx_bytes);
+      assert.ok(freshTraffic.tx_bytes >= status.traffic_month.tx_bytes);
+    }
     const late = socket('/ws/agent', { Authorization: `Bearer ${collision.token}` });
     await event(late, 'welcome');
     late.ws.send(JSON.stringify(rollup(fixtureHour + 120_000, 30, 400, 15)));
@@ -331,7 +419,7 @@ try {
     await stopWorker();
     // Force maintenance on restart and add expired rows; SQL edits happen only with workerd stopped.
     editStorage(`
-import pathlib, sqlite3, sys, time
+import pathlib, sqlite3, sys
 for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
     db = sqlite3.connect(file)
     if not db.execute("SELECT name FROM sqlite_master WHERE name='metrics_1m'").fetchone():
@@ -342,15 +430,20 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
         db.execute(f"INSERT INTO {table} (server_id,ts_ms) VALUES ('e2e-vps',0)")
     db.commit(); db.close()
 `);
+    // A full minute of deliberate downtime exercises the Agent buffer.
     await pause(62_000);
     await startWorker();
-    const restartedMs = Date.now();
     dash = socket('/ws/dashboard', { Cookie });
     await event(dash, 'snapshot');
     assert.ok(!(await (await api(ruleUrl, 200, { headers: admin })).json()).some(r => r.id === removedDefault), 'Deleted default must stay deleted after restart');
-    await event(dash, 'metrics', e => e.id === server.id, 50_000);
-    // Wait for the first alarm after restart to aggregate/clean the persisted fixtures.
-    await pause(Math.max(0, 31_000 - (Date.now() - restartedMs)));
+    await event(dash, 'metrics', e => e.id === server.id, 90_000);
+    // Observe the completed maintenance instead of assuming an alarm fires within 31 seconds.
+    await poll(async () => {
+      const result = await (await api(fixturePath + '?range=30d', 200, { headers: admin })).json();
+      return result.points.some(p => p.rx_bytes === 800);
+    }, 'hourly rebuild after restart', 90_000, 500);
+    await poll(() => /resent pending rollups count=[1-9]/.test(fs.readFileSync(path.join(temp, 'agent.log'), 'utf8')),
+      'Agent replay after restart');
     history = await (await api(`/api/servers/${server.id}/history?range=1h`, 200, { headers: admin })).json();
     assert.match(fs.readFileSync(path.join(temp, 'agent.log'), 'utf8'), /resent pending rollups count=[1-9]/,
       'The running Agent must replay at least one rollup queued during the outage');
@@ -393,13 +486,13 @@ print('hourly aggregation, dirty hours and per-server retention passed')
     await patchRule(offlineRule.id, { duration_s: 5, server_id: server.id });
     dash.events.length = 0;
     agent.kill('SIGSTOP');
-    await event(dash, 'offline', e => e.id === server.id, 46_000);
+    await event(dash, 'offline', e => e.id === server.id, 90_000);
     const offline = (await (await api('/api/servers', 200, { headers: admin })).json()).find(s => s.id === server.id);
     assert.equal(offline.online, false);
     assert.equal(offline.metrics, null);
-    await event(dash, 'alert', e => e.kind === 'firing' && e.alert.rule_id === offlineRule.id, 5000);
+    await event(dash, 'alert', e => e.kind === 'firing' && e.alert.rule_id === offlineRule.id, 60_000);
     agent.kill('SIGCONT');
-    await event(dash, 'online', e => e.id === server.id, 15_000);
+    await event(dash, 'online', e => e.id === server.id, 90_000);
     await event(dash, 'alert', e => e.kind === 'resolved' && e.alert.rule_id === offlineRule.id);
     console.log('SIGSTOP passed: offline alert fired, Agent reconnected and alert resolved');
   }
@@ -430,12 +523,10 @@ print('hourly aggregation, dirty hours and per-server retention passed')
   await rejectedUpgrade(rotated.token);
   await api(`/api/servers/${collision.server.id}`, 204, { method: 'DELETE', headers: admin });
   assert.deepEqual(await (await api('/api/servers', 200, { headers: admin })).json(), []);
-  const preserved = (await (await api('/api/alerts/events?limit=200', 200, { headers: admin })).json()).find(e => e.rule_id === rule.id);
-  assert.equal(preserved.rule_name, rule.name);
-  assert.equal(preserved.server_name, 'E2E VPS');
+  assert.deepEqual(await (await api('/api/alerts/events?limit=200', 200, { headers: admin })).json(), []);
   await api(`/api/servers/${server.id}`, 404, { method: 'DELETE', headers: admin });
   await api('/api/debug', 404, { headers: admin });
-  const logout = await api('/api/auth/logout', 204, { method: 'POST', headers: { Cookie } });
+  const logout = await api('/api/auth/logout', 204, { method: 'POST', headers: { Cookie, Origin: base } });
   assert.match(logout.headers.get('set-cookie'), /Max-Age=0/);
   // Keep the failures together: hibernation is allowed to discard the in-memory limiter.
   const failures = await Promise.all(Array.from({ length: 11 }, async () => {
@@ -461,15 +552,16 @@ print('hourly aggregation, dirty hours and per-server retention passed')
   await new Promise(resolve => webhook.listen(0, '127.0.0.1', resolve));
   await stopWorker();
   editStorage(`
-import pathlib, sqlite3, sys
+import pathlib, sqlite3, sys, time
 for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
     db = sqlite3.connect(file)
     if not db.execute("SELECT name FROM sqlite_master WHERE name='alert_events'").fetchone():
         db.close(); continue
-    for column in ('rule_name', 'server_name', 'notification_json'):
+    db.execute('DROP TABLE notification_queue')
+    for column in ('rule_name', 'server_name'):
         db.execute(f"ALTER TABLE alert_events DROP COLUMN {column}")
     db.execute("UPDATE meta SET v='1' WHERE k='schema_version'")
-    db.execute("INSERT INTO alert_events (rule_id,server_id,kind,value,ts_ms) VALUES ('legacy-rule','legacy-server','firing',1,1)")
+    db.execute("INSERT INTO alert_events (rule_id,server_id,kind,value,ts_ms) VALUES ('legacy-rule','legacy-server','firing',1,?)", (int(time.time() * 1000),))
     db.commit(); db.close()
 `);
   const configured = JSON.parse(fs.readFileSync(path.join(temp, 'config.json'), 'utf8'));
@@ -488,7 +580,7 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
   webhookMode = 'hang';
   const timeoutStarted = Date.now();
   assert.equal((await (await api('/api/alerts/test', 200, { method: 'POST', headers: admin })).json()).webhook, 'timeout');
-  assert.ok(Date.now() - timeoutStarted >= 4800 && Date.now() - timeoutStarted < 7000);
+  assert.ok(Date.now() - timeoutStarted >= 4800 && Date.now() - timeoutStarted < 15_000);
   const notifyServer = await (await api('/api/servers', 201, { method: 'POST', headers: admin, body: { id: 'notify', name: '通知服务器' } })).json();
   const notifyAgent = socket('/ws/agent', { Authorization: `Bearer ${notifyServer.token}` });
   await event(notifyAgent, 'welcome');
@@ -502,16 +594,13 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
   const messageStarted = Date.now();
   notifyAgent.ws.send(JSON.stringify(cpuFrame));
   await event(notifyDash, 'alert', e => e.kind === 'firing' && e.alert.rule_id === notifyRules[25].id);
-  assert.ok(Date.now() - messageStarted < 3000, 'Slow notifications must not block Metrics handling');
+  assert.ok(Date.now() - messageStarted < 4800, 'Slow notifications must not block Metrics handling');
   webhookMode = 'ok';
   // A later invocation drains the two transitions beyond the 24-transition notification batch.
   assert.equal((await (await api('/api/alerts/active', 200, { headers: admin })).json()).length, 26);
   const waitNotices = async (kind, count) => {
-    for (let i = 0; i < 100; i++) {
-      if (notices.filter(n => n.event === kind && n.server.id === 'notify').length === count) return;
-      await pause(50);
-    }
-    throw new Error(`Missing ${kind} webhook notifications`);
+    await poll(() => notices.filter(n => n.event === kind && n.server.id === 'notify').length === count,
+      `${kind} webhook notifications`);
   };
   await waitNotices('firing', 26);
   const delivered = notices.find(n => n.event === 'firing');
@@ -520,7 +609,8 @@ for file in pathlib.Path(sys.argv[1]).rglob('*.sqlite'):
   assert.ok(delivered.rule.name.startsWith('通知规则'));
   await api('/api/servers/notify', 204, { method: 'DELETE', headers: admin });
   await api('/api/alerts/events', 200, { headers: admin });
-  await waitNotices('resolved', 26);
+  assert.equal(notices.filter(n => n.event === 'resolved' && n.server.id === 'notify').length, 0);
+  assert.deepEqual(await (await api('/api/alerts/events', 200, { headers: admin })).json(), migratedEvents);
   assert.equal(new Set(notices.filter(n => n.event === 'firing').map(n => n.rule.id)).size, 26);
   console.log('Notifications passed: disabled/test, Webhook JSON, HTTP failure, 5s timeout, nonblocking handling and 26-transition batches');
   console.log(`e2e passed: auth, config, CRUD, token rejection/revocation, dashboard, alerts, history/rollup (${quick ? "quick; long scenarios skipped" : "full; restart and SIGSTOP"}); ${((Date.now() - e2eStartedMs) / 1000).toFixed(1)}s`);

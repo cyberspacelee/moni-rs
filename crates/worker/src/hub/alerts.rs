@@ -273,10 +273,20 @@ impl Hub {
         frame: &MetricsFrame,
     ) -> Result<()> {
         let now = now_ms();
-        let active = self.active_alerts()?;
-        let Some(server) = self.server_row(&conn.server_id)? else {
-            return Ok(());
-        };
+        #[derive(Deserialize)]
+        struct Firing {
+            rule_id: String,
+            since_ms: i64,
+        }
+        let active = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT rule_id,since_ms FROM alert_state WHERE server_id = ?",
+                vec![conn.server_id.as_str().into()],
+            )?
+            .to_array::<Firing>()?;
         let rules = self.rules()?;
         conn.pending.retain(|id, _| {
             rules.iter().any(|r| {
@@ -290,9 +300,7 @@ impl Hub {
             .iter()
             .filter(|r| r.metric != AlertMetric::Offline && applies(r, &conn.server_id))
         {
-            let firing = active
-                .iter()
-                .find(|a| a.rule_id == rule.id && a.server_id == conn.server_id);
+            let firing = active.iter().find(|a| a.rule_id == rule.id);
             let value = alert_logic::metric_value(rule.metric, frame);
             match alert_logic::evaluate(
                 rule,
@@ -312,16 +320,19 @@ impl Hub {
                 action => {
                     let since = conn.pending.remove(&rule.id).unwrap_or(now);
                     match action {
-                        Action::Firing => self.transition(
-                            AlertKind::Firing,
-                            active_for(rule, &server, Some(value), since),
-                            now,
-                        )?,
-                        Action::Resolved => {
-                            if let Some(alert) = firing {
-                                let mut alert = alert.clone();
-                                alert.value = Some(value);
-                                self.transition(AlertKind::Resolved, alert, now)?;
+                        Action::Firing | Action::Resolved => {
+                            if let Some(server) = self.server_row(&conn.server_id)? {
+                                let kind = if action == Action::Firing {
+                                    AlertKind::Firing
+                                } else {
+                                    AlertKind::Resolved
+                                };
+                                let since = firing.map_or(since, |alert| alert.since_ms);
+                                self.transition(
+                                    kind,
+                                    active_for(rule, &server, Some(value), since),
+                                    now,
+                                )?;
                             }
                         }
                         _ => {}
@@ -409,9 +420,26 @@ impl Hub {
             value: alert.value,
             ts_ms: now,
         };
-        sql.exec("INSERT INTO alert_events (rule_id,server_id,kind,value,ts_ms,rule_name,server_name,notification_json)
-            VALUES (?,?,?,?,?,?,?,?)", vec![alert.rule_id.as_str().into(),alert.server_id.as_str().into(),event.into(),alert.value.into(),now.into(),
-                alert.rule_name.as_str().into(),alert.server_name.as_str().into(),serde_json::to_string(&notice)?.into()])?;
+        sql.exec(
+            "INSERT INTO alert_events (rule_id,server_id,kind,value,ts_ms,rule_name,server_name)
+            VALUES (?,?,?,?,?,?,?)",
+            vec![
+                alert.rule_id.as_str().into(),
+                alert.server_id.as_str().into(),
+                event.into(),
+                alert.value.into(),
+                now.into(),
+                alert.rule_name.as_str().into(),
+                alert.server_name.as_str().into(),
+            ],
+        )?;
+        sql.exec(
+            "INSERT INTO notification_queue (server_id,notification_json) VALUES (?,?)",
+            vec![
+                alert.server_id.as_str().into(),
+                serde_json::to_string(&notice)?.into(),
+            ],
+        )?;
         self.broadcast(&DashboardEvent::Alert { kind, alert });
         Ok(())
     }
@@ -424,12 +452,17 @@ impl Hub {
         }
         let sql = self.state.storage().sql();
         // A transition uses at most two requests; leave room below the Free invocation limit of 50.
-        let rows = sql.exec("SELECT id,notification_json FROM alert_events WHERE notification_json IS NOT NULL ORDER BY id LIMIT 24", None)?.to_array::<Queued>()?;
+        let rows = sql
+            .exec(
+                "SELECT id,notification_json FROM notification_queue ORDER BY id LIMIT 24",
+                None,
+            )?
+            .to_array::<Queued>()?;
         for row in rows {
             let notice = serde_json::from_str::<Notification>(&row.notification_json)?;
             // Claim before awaiting; delivery failures are logged, never retried.
             sql.exec(
-                "UPDATE alert_events SET notification_json = NULL WHERE id = ?",
+                "DELETE FROM notification_queue WHERE id = ?",
                 vec![row.id.into()],
             )?;
             let env = self.env.clone();

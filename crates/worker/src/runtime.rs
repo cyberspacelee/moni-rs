@@ -1,4 +1,4 @@
-use crate::{auth, error};
+use crate::{auth, error, logic};
 use moni_protocol::api::{ApiErrorCode, AppConfig, AuthMeResponse, Notifications, Retention};
 use worker::*;
 
@@ -89,11 +89,27 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         req.headers_mut()?.delete("authorization")?;
         return to_hub(req, &env).await;
     }
-    if path == "/api/auth/login" && req.method() == Method::Post {
-        return to_hub(req, &env).await;
-    }
-    if !auth::is_admin(&req, &secrets) {
+    let login = path == "/api/auth/login" && req.method() == Method::Post;
+    let bearer_admin = auth::bearer(&req).is_some_and(|v| auth::secret_eq(&v, &secrets.password));
+    if !login && !auth::is_admin(&req, &secrets) {
         return error::unauthorized();
+    }
+    let write = req.method() != Method::Get && path.starts_with("/api/");
+    if !bearer_admin && (login || write || path == "/ws/dashboard") {
+        let origin = req.headers().get("origin")?;
+        let target = req.url()?.origin().ascii_serialization();
+        if !logic::origin_allowed(origin.as_deref(), &target, !login) {
+            return error::error(403, ApiErrorCode::Forbidden, "Same-origin request required");
+        }
+    }
+    if write
+        && req.inner().body().is_some()
+        && !logic::json_content_type(req.headers().get("content-type")?.as_deref())
+    {
+        return error::error(415, ApiErrorCode::BadRequest, "Expected application/json");
+    }
+    if login {
+        return to_hub(req, &env).await;
     }
     match (req.method(), path.as_str()) {
         (Method::Post, "/api/auth/logout") => auth::session_response(&req, &secrets.key, true),

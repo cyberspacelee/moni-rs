@@ -4,8 +4,7 @@ pub mod logic;
 #[cfg(target_arch = "wasm32")]
 mod notifications;
 
-#[cfg(target_arch = "wasm32")]
-mod auth;
+pub mod auth;
 #[cfg(target_arch = "wasm32")]
 mod error;
 #[cfg(target_arch = "wasm32")]

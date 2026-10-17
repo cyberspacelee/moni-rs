@@ -12,14 +12,15 @@ moni-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-worker = "0.8.7"
-futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
-console_error_panic_hook = "0.1"
 base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
 subtle = "2.6"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+worker = "0.8.7"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [package.metadata.wasm-pack.profile.release]

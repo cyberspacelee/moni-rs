@@ -5,9 +5,13 @@ mod data;
 mod schema;
 mod servers;
 
-use std::{cell::RefCell, collections::HashMap, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    time::Duration,
+};
 
-use moni_protocol::api::{ApiErrorCode, DashboardEvent, LoginRequest, MetricsFrame};
+use moni_protocol::api::{ApiErrorCode, DashboardEvent, LoginRequest, MetricsFrame, Traffic};
 use moni_protocol::{AgentMessage, CLOSE_INCOMPATIBLE, HubMessage, PROTOCOL_VERSION};
 use serde::{Deserialize, Serialize};
 use worker::*;
@@ -41,6 +45,26 @@ struct AgentConn {
     pending: HashMap<String, i64>,
     #[serde(default)]
     pending_warn_ms: Option<i64>,
+    #[serde(default)]
+    traffic_month: Option<CachedTraffic>,
+}
+
+// Attachments use JS numbers; serializing a u64 above 2^53 through workers-rs fails.
+#[derive(Serialize, Deserialize, Clone)]
+struct CachedTraffic {
+    rx_bytes: f64,
+    tx_bytes: f64,
+    since_ms: i64,
+}
+
+impl From<CachedTraffic> for Traffic {
+    fn from(value: CachedTraffic) -> Self {
+        Self {
+            rx_bytes: value.rx_bytes as u64,
+            tx_bytes: value.tx_bytes as u64,
+            since_ms: value.since_ms,
+        }
+    }
 }
 
 fn tag_for(id: &str) -> String {
@@ -58,31 +82,13 @@ fn save(ws: &WebSocket, conn: AgentConn) -> Result<()> {
     ws.serialize_attachment(Attachment::Agent(conn))
 }
 
-#[derive(Default)]
-struct LoginFailures {
-    by_ip: HashMap<String, (i64, u8)>,
-}
-
-impl LoginFailures {
-    fn limited(&mut self, ip: &str, now: i64, failed: bool) -> bool {
-        self.by_ip.retain(|_, (start, _)| now - *start < 60_000);
-        if self.by_ip.get(ip).is_some_and(|(_, count)| *count >= 10) {
-            return true;
-        }
-        if failed {
-            let (_, count) = self.by_ip.entry(ip.into()).or_insert((now, 0));
-            *count += 1;
-        }
-        false
-    }
-}
-
 #[durable_object]
 pub struct Hub {
     state: State,
     env: Env,
-    login_failures: RefCell<LoginFailures>,
+    login_failures: RefCell<logic::LoginFailures>,
     rules_cache: RefCell<Option<Vec<moni_protocol::api::AlertRule>>>,
+    alarm_check_ms: Cell<Option<i64>>,
 }
 
 impl DurableObject for Hub {
@@ -95,6 +101,7 @@ impl DurableObject for Hub {
             env,
             login_failures: RefCell::default(),
             rules_cache: RefCell::default(),
+            alarm_check_ms: Cell::new(None),
         };
         if hub.rules().is_err() {
             console_error!("Hub alert rule loading failed");
@@ -139,6 +146,8 @@ impl DurableObject for Hub {
             }
         };
         conn.last_seen_ms = now_ms();
+        self.heal_alarm(conn.last_seen_ms).await;
+        self.refresh_traffic(&ws, &mut conn)?;
         match message {
             AgentMessage::Hello {
                 protocol,
@@ -182,8 +191,30 @@ impl DurableObject for Hub {
                 });
             }
             AgentMessage::Rollup(rollup) => {
-                self.store_rollup(&conn.server_id, &rollup)?;
-                save(&ws, conn)?;
+                let stored = match self.store_rollup(&mut conn, &rollup).and_then(|stored| {
+                    save(&ws, conn.clone())?;
+                    Ok(stored)
+                }) {
+                    Ok(stored) => stored,
+                    Err(error) => {
+                        console_error!(
+                            "Hub rollup persistence failed server={}: {}",
+                            conn.server_id,
+                            error
+                        );
+                        if let Err(error) = self.on_disconnect(&ws) {
+                            console_error!("Hub disconnect after rollup failure failed: {}", error);
+                        }
+                        ws.close(Some(1011), Some("rollup persistence failed"))?;
+                        return Err(error);
+                    }
+                };
+                if stored && let Some(traffic) = conn.traffic_month {
+                    self.broadcast(&DashboardEvent::Traffic {
+                        id: conn.server_id,
+                        traffic: traffic.into(),
+                    });
+                }
                 ws.send(&HubMessage::Ack {
                     minute_ms: rollup.minute_ms,
                 })?;
@@ -245,6 +276,7 @@ impl DurableObject for Hub {
             && let Err(error) = self.schedule_alarm().await
         {
             console_error!("Hub alarm scheduling failed: {}", error);
+            return Err(error);
         }
         Response::from_json(&"ok")
     }
@@ -331,6 +363,28 @@ impl Hub {
             .await
     }
 
+    async fn heal_alarm(&self, now: i64) {
+        if self
+            .alarm_check_ms
+            .get()
+            .is_some_and(|last| now.saturating_sub(last) < 300_000)
+        {
+            return;
+        }
+        // This throttle may be lost on eviction; correctness lives in the platform alarm.
+        self.alarm_check_ms.set(Some(now));
+        let result = async {
+            if self.state.storage().get_alarm().await?.is_none() {
+                self.schedule_alarm().await?;
+            }
+            Ok::<(), Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            console_error!("Hub alarm recovery failed: {}", error);
+        }
+    }
+
     async fn accept_agent(&self, req: Request) -> Result<Response> {
         let Some(id) = req.headers().get(H_SERVER_ID)? else {
             return error::unauthorized();
@@ -368,6 +422,7 @@ impl Hub {
                 parse_warn_ms: None,
                 pending: HashMap::new(),
                 pending_warn_ms: None,
+                traffic_month: Some(self.safe_traffic_month(&id)),
             },
         )?;
         pair.server.send(&HubMessage::Welcome {
@@ -437,21 +492,5 @@ impl Hub {
         for ws in self.state.get_websockets_with_tag(TAG_DASH) {
             let _ = ws.send_with_str(&json);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failed_logins_are_limited_per_ip_and_expire() {
-        let mut failures = LoginFailures::default();
-        for _ in 0..10 {
-            assert!(!failures.limited("one", 1000, true));
-        }
-        assert!(failures.limited("one", 1001, false));
-        assert!(!failures.limited("two", 1001, true));
-        assert!(!failures.limited("one", 61_000, true));
     }
 }

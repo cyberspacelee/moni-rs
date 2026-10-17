@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use worker::{Result, SqlStorage};
 
-const VERSION: &str = "2";
+const VERSION: &str = "3";
 
 #[derive(Deserialize)]
 struct Column {
@@ -44,7 +44,11 @@ pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
         .to_array::<Version>()?;
     match version.first().map(|v| v.v.as_str()) {
         Some(VERSION) => return Ok(()),
-        Some("1") => return migrate_alerts(sql, false),
+        Some("2") => return migrate_queues(sql),
+        Some("1") => {
+            migrate_alerts(sql, false)?;
+            return migrate_queues(sql);
+        }
         Some("0") | None => {}
         Some(_) => {
             return Err(worker::Error::RustError(
@@ -123,7 +127,8 @@ pub(super) fn migrate(sql: &SqlStorage) -> Result<()> {
       ON CONFLICT(k) DO UPDATE SET v = excluded.v",
         None,
     )?;
-    migrate_alerts(sql, fresh)
+    migrate_alerts(sql, fresh)?;
+    migrate_queues(sql)
 }
 
 fn migrate_alerts(sql: &SqlStorage, fresh: bool) -> Result<()> {
@@ -154,5 +159,26 @@ fn migrate_alerts(sql: &SqlStorage, fresh: bool) -> Result<()> {
         }
     }
     sql.exec("UPDATE meta SET v = '2' WHERE k = 'schema_version'", None)?;
+    Ok(())
+}
+
+fn migrate_queues(sql: &SqlStorage) -> Result<()> {
+    sql.exec(
+        "CREATE TABLE IF NOT EXISTS alert_state_v3 (
+        server_id TEXT, rule_id TEXT, since_ms INTEGER, value REAL,
+        PRIMARY KEY (server_id, rule_id)
+    ) WITHOUT ROWID;
+    INSERT OR REPLACE INTO alert_state_v3 SELECT server_id,rule_id,since_ms,value FROM alert_state;
+    DROP TABLE alert_state;
+    ALTER TABLE alert_state_v3 RENAME TO alert_state;
+    CREATE TABLE IF NOT EXISTS notification_queue (
+        id INTEGER PRIMARY KEY, server_id TEXT NOT NULL, notification_json TEXT NOT NULL
+    );
+    INSERT OR REPLACE INTO notification_queue (id,server_id,notification_json)
+        SELECT id,server_id,notification_json FROM alert_events WHERE notification_json IS NOT NULL;
+    ALTER TABLE alert_events DROP COLUMN notification_json;
+    UPDATE meta SET v = '3' WHERE k = 'schema_version'",
+        None,
+    )?;
     Ok(())
 }

@@ -171,22 +171,30 @@ pub struct AlertRuleInput {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
 pub struct AlertRulePatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub server_id: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub metric: Option<AlertMetric>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub op: Option<AlertOp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub threshold: Option<f64>,
     #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub recover_threshold: Option<Option<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub duration_s: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub enabled: Option<bool>,
 }
@@ -268,6 +276,10 @@ pub enum DashboardEvent {
         id: String,
         frame: MetricsFrame,
     },
+    Traffic {
+        id: String,
+        traffic: Traffic,
+    },
     Alert {
         kind: AlertKind,
         alert: ActiveAlert,
@@ -309,6 +321,7 @@ pub struct CreateServerResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
 pub struct UpdateServerRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub name: Option<String>,
 }

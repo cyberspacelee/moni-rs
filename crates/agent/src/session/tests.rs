@@ -302,3 +302,47 @@ async fn shutdown_sends_a_close_frame() {
     .unwrap();
     assert_eq!(end, End::Shutdown);
 }
+
+#[tokio::test(start_paused = true)]
+async fn unacknowledged_rollup_is_retried_on_a_live_connection() {
+    let config = config("ws://localhost/ws/agent");
+    let state = State::new(&config);
+    state.queue.borrow_mut().insert(minute(0));
+    state.queue.borrow_mut().insert(minute(60_000));
+    let host = host();
+    let (mut client, mut server) = pair().await;
+    let peer = async {
+        welcome(&mut server, 5).await;
+        assert_eq!(
+            next_agent(&mut server).await,
+            AgentMessage::Rollup(minute(0))
+        );
+        assert_eq!(
+            next_agent(&mut server).await,
+            AgentMessage::Rollup(minute(60_000))
+        );
+        hub(&mut server, HubMessage::Ack { minute_ms: 60_000 }).await;
+        let started = Instant::now();
+        loop {
+            match server.next().await.unwrap().unwrap() {
+                Message::Ping(_) => {
+                    server.flush().await.unwrap();
+                }
+                Message::Text(text) => {
+                    assert_eq!(
+                        serde_json::from_str::<AgentMessage>(&text).unwrap(),
+                        AgentMessage::Rollup(minute(0))
+                    );
+                    assert_eq!(started.elapsed(), Duration::from_secs(90));
+                    break;
+                }
+                other => panic!("Unexpected frame: {other:?}"),
+            }
+        }
+        hub(&mut server, HubMessage::Ack { minute_ms: 0 }).await;
+        close(&mut server, 4000).await;
+    };
+    let (end, ()) = tokio::join!(communicate(&mut client, &config, &host, &state), peer);
+    assert_eq!(end, Err(End::Closed(Some(4000))));
+    assert!(state.queue.borrow_mut().take_unsent().is_empty());
+}

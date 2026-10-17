@@ -1,10 +1,14 @@
 use std::{collections::BTreeMap, num::NonZeroUsize};
 
 use moni_protocol::MinuteRollup;
+use std::time::Duration;
+use tokio::time::Instant;
+
+const ACK_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub struct PendingQueue {
     capacity: NonZeroUsize,
-    entries: BTreeMap<i64, (MinuteRollup, bool)>,
+    entries: BTreeMap<i64, (MinuteRollup, Option<Instant>)>,
 }
 
 impl PendingQueue {
@@ -16,7 +20,7 @@ impl PendingQueue {
     }
 
     pub fn insert(&mut self, rollup: MinuteRollup) -> Option<i64> {
-        self.entries.insert(rollup.minute_ms, (rollup, false));
+        self.entries.insert(rollup.minute_ms, (rollup, None));
         if self.entries.len() > self.capacity.get() {
             self.entries.pop_first().map(|(minute_ms, _)| minute_ms)
         } else {
@@ -30,18 +34,19 @@ impl PendingQueue {
 
     pub fn resend_all(&mut self) {
         for (_, sent) in self.entries.values_mut() {
-            *sent = false;
+            *sent = None;
         }
     }
 
     pub fn take_unsent(&mut self) -> Vec<MinuteRollup> {
+        let now = Instant::now();
         self.entries
             .values_mut()
             .filter_map(|(rollup, sent)| {
-                if *sent {
+                if sent.is_some_and(|at| now.duration_since(at) < ACK_TIMEOUT) {
                     return None;
                 }
-                *sent = true;
+                *sent = Some(now);
                 Some(rollup.clone())
             })
             .collect()

@@ -4,5 +4,6 @@ import type { AlertKind } from "./AlertKind";
 import type { HostInfo } from "./HostInfo";
 import type { MetricsFrame } from "./MetricsFrame";
 import type { ServerStatus } from "./ServerStatus";
+import type { Traffic } from "./Traffic";
 
-export type DashboardEvent = { "type": "snapshot", servers: Array<ServerStatus>, alerts: Array<ActiveAlert>, } | { "type": "server_upsert", server: ServerStatus, } | { "type": "server_removed", id: string, } | { "type": "online", id: string, agent_version: string | null, host: HostInfo | null, } | { "type": "offline", id: string, last_seen_ms: number, } | { "type": "metrics", id: string, frame: MetricsFrame, } | { "type": "alert", kind: AlertKind, alert: ActiveAlert, };
+export type DashboardEvent = { "type": "snapshot", servers: Array<ServerStatus>, alerts: Array<ActiveAlert>, } | { "type": "server_upsert", server: ServerStatus, } | { "type": "server_removed", id: string, } | { "type": "online", id: string, agent_version: string | null, host: HostInfo | null, } | { "type": "offline", id: string, last_seen_ms: number, } | { "type": "metrics", id: string, frame: MetricsFrame, } | { "type": "traffic", id: string, traffic: Traffic, } | { "type": "alert", kind: AlertKind, alert: ActiveAlert, };

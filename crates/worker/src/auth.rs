@@ -2,17 +2,22 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+#[cfg(target_arch = "wasm32")]
 use worker::{Env, Request, Response, Result};
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) const H_SERVER_ID: &str = "x-moni-server-id";
+#[cfg(target_arch = "wasm32")]
 pub(crate) const H_TOKEN_HASH: &str = "x-moni-token-hash";
 const SESSION_MS: i64 = 30 * 86_400_000;
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) struct Secrets {
     pub password: String,
     pub key: String,
 }
 
+#[cfg(target_arch = "wasm32")]
 impl Secrets {
     pub fn load(env: &Env) -> Option<Self> {
         let password = env.secret("ADMIN_PASSWORD").ok()?.to_string();
@@ -21,32 +26,33 @@ impl Secrets {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn now_ms() -> i64 {
     worker::Date::now().as_millis() as i64
 }
 
-pub(crate) fn secret_eq(a: &str, b: &str) -> bool {
+pub fn secret_eq(a: &str, b: &str) -> bool {
     // Compare fixed-size digests so neither a matching prefix nor secret length shortens comparison.
     bool::from(Sha256::digest(a.as_bytes()).ct_eq(&Sha256::digest(b.as_bytes())))
 }
 
-fn sign(key: &str, value: &str) -> Result<Vec<u8>> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
-        .map_err(|_| worker::Error::RustError("Invalid signing key".into()))?;
+fn sign(key: &str, value: &str) -> std::result::Result<Vec<u8>, &'static str> {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key.as_bytes()).map_err(|_| "Invalid signing key")?;
     mac.update(value.as_bytes());
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
-pub(crate) fn token_hash(key: &str, token: &str) -> Result<String> {
+pub fn token_hash(key: &str, token: &str) -> std::result::Result<String, &'static str> {
     use std::fmt::Write;
     let mut hex = String::with_capacity(64);
     for byte in sign(key, token)? {
-        write!(hex, "{byte:02x}")
-            .map_err(|_| worker::Error::RustError("Cannot encode token hash".into()))?;
+        write!(hex, "{byte:02x}").map_err(|_| "Cannot encode token hash")?;
     }
     Ok(hex)
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn bearer(req: &Request) -> Option<String> {
     req.headers()
         .get("authorization")
@@ -56,7 +62,7 @@ pub(crate) fn bearer(req: &Request) -> Option<String> {
         .map(str::to_owned)
 }
 
-pub(crate) fn valid_id(id: &str) -> bool {
+pub fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 32
         && id
@@ -64,7 +70,7 @@ pub(crate) fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-pub(crate) fn agent_id(token: &str) -> Option<&str> {
+pub fn agent_id(token: &str) -> Option<&str> {
     let (id, secret) = token.strip_prefix("mn_")?.split_once('_')?;
     (valid_id(id)
         && secret.len() == 43
@@ -75,6 +81,7 @@ pub(crate) fn agent_id(token: &str) -> Option<&str> {
         .then_some(id)
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn new_token(id: &str) -> Result<String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes)
@@ -82,7 +89,7 @@ pub(crate) fn new_token(id: &str) -> Result<String> {
     Ok(format!("mn_{id}_{}", URL_SAFE_NO_PAD.encode(bytes)))
 }
 
-fn valid_session(value: &str, key: &str, now: i64) -> bool {
+pub fn valid_session(value: &str, key: &str, now: i64) -> bool {
     let Some((expiry, signature)) = value.split_once('.') else {
         return false;
     };
@@ -102,6 +109,7 @@ fn valid_session(value: &str, key: &str, now: i64) -> bool {
     mac.verify_slice(&signature).is_ok()
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn is_admin(req: &Request, secrets: &Secrets) -> bool {
     if bearer(req).is_some_and(|value| secret_eq(&value, &secrets.password)) {
         return true;
@@ -120,6 +128,7 @@ pub(crate) fn is_admin(req: &Request, secrets: &Secrets) -> bool {
         })
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn session_response(req: &Request, key: &str, clear: bool) -> Result<Response> {
     let value = if clear {
         String::new()
@@ -149,7 +158,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sessions_and_agent_tokens_reject_tampering() -> Result<()> {
+    fn sessions_and_agent_tokens_reject_tampering() -> std::result::Result<(), &'static str> {
         let key = "a signing key that is at least 32 bytes";
         let signature = URL_SAFE_NO_PAD.encode(sign(key, "session:2000")?);
         assert!(valid_session(&format!("2000.{signature}"), key, 1000));

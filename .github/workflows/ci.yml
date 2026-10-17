@@ -23,7 +23,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy -p moni-protocol -p moni-agent -- -D warnings
+      - run: cargo clippy -p moni-protocol -p moni-agent -p moni-worker -- -D warnings
       - run: cargo clippy -p moni-worker --target wasm32-unknown-unknown -- -D warnings
       - run: cargo test -p moni-protocol -p moni-agent
       - run: cargo test -p moni-worker --lib
@@ -50,5 +50,6 @@ jobs:
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
       - run: worker-build --release
         working-directory: crates/worker
+      - run: scripts/e2e.sh --quick
       - run: sh -n scripts/install-agent.sh
       - run: python3 scripts/test-install-agent.py
