@@ -1,0 +1,40 @@
+name: Release agent
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-zigbuild
+        run: pip install cargo-zigbuild
+      - name: Build static binaries
+        run: |
+          cargo zigbuild --release -p moni-agent \
+            --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-musl/release/moni-agent dist/moni-agent-linux-amd64
+          cp target/aarch64-unknown-linux-musl/release/moni-agent dist/moni-agent-linux-arm64
+          cp scripts/install-agent.sh dist/
+          (cd dist && sha256sum * > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moni-agent
+          path: dist/*
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

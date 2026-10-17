@@ -1,0 +1,11 @@
+{
+  "name": "moni-rs",
+  "private": true,
+  "scripts": {
+    "dev": "cd crates/worker && wrangler dev",
+    "deploy": "cd crates/worker && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.1"
+  }
+}

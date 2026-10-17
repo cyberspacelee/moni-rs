@@ -1,0 +1,10 @@
+/target
+node_modules/
+crates/worker/build/
+.wrangler/
+.dev.vars
+.env*
+!.env.example
+!crates/worker/.dev.vars.example
+web/dist/*
+!web/dist/.gitkeep

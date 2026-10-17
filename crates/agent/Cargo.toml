@@ -1,0 +1,18 @@
+[package]
+name = "moni-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+moni-protocol.workspace = true
+serde_json.workspace = true
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system", "disk", "network"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "signal"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

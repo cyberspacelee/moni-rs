@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/protocol", "crates/agent", "crates/worker"]
+# worker 只能编译到 wasm32，由 worker-build 单独构建
+default-members = ["crates/protocol", "crates/agent"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+moni-protocol = { path = "crates/protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+# wasm-bindgen needs the custom sections that `strip` would remove, so only strip native binaries.
+[profile.release.package.moni-agent]
+strip = true
+
+[profile.release.package.moni-worker]
+opt-level = "z"

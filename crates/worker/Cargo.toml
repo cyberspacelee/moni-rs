@@ -1,0 +1,18 @@
+[package]
+name = "moni-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+moni-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+worker = "0.8.7"
+console_error_panic_hook = "0.1"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz"]

@@ -1,0 +1,23 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "moni-rs",
+  "main": "build/index.js",
+  "compatibility_date": "2026-10-01",
+  "build": { "command": "worker-build --release" },
+  "assets": {
+    "directory": "./assets",
+    "binding": "ASSETS",
+    // 只有 API / WS 走 Worker，静态资源请求免费且不计入 Worker 请求数
+    "run_worker_first": ["/api/*", "/ws/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "HUB", "class_name": "Hub" }]
+  },
+  // Free 计划只能使用 SQLite 型 DO
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
+  "vars": {
+    "REPORT_INTERVAL_S": "5",
+    "RETENTION_DAYS": "7"
+  },
+  "observability": { "enabled": true }
+}
