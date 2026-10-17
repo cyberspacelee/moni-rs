@@ -8,6 +8,7 @@
 - `u64`/`i64` 在 TS 中映射为 `number`（ts-rs 通过 `#[ts(type = "number")]` 指定）。
 - 错误响应：HTTP 4xx/5xx，响应体 `{"error": "<code>", "message": "<可读说明>"}`。错误码：`unauthorized`、`forbidden`、`not_found`、`bad_request`、`conflict`、`rate_limited`、`not_configured`、`internal`。
 - 鉴权：除 `/api/health`、`/api/auth/login` 外，所有 `/api/*` 和 `/ws/dashboard` 都需要管理员会话（Cookie `moni_session`）或 `Authorization: Bearer <ADMIN_PASSWORD>`。
+- CSRF：使用 Cookie 鉴权时，`/ws/dashboard` 握手和所有非 GET 的 `/api/*` 请求都必须带 `Origin`，并且与请求目标源完全一致（缺失、`null` 或不一致 → `403 forbidden`）；带请求体的写操作必须使用 `Content-Type: application/json`（否则返回 `415`，错误码 `bad_request`）。Bearer 鉴权（CLI）不校验 Origin。`/api/auth/login` 同样校验 Origin（存在时必须一致）。
 
 ## 1. 认证
 
@@ -66,7 +67,7 @@ type ServerStatus = {
 | GET | `/api/servers` | — | `ServerStatus[]`（按 name 排序） |
 | POST | `/api/servers` | `{"name": string, "id"?: string}` | `201 {"server": ServerStatus, "token": string}`。id 省略时由 name 生成 slug，冲突时追加 `-2`、`-3`…；id 已存在且是显式指定的 → `409 conflict` |
 | PATCH | `/api/servers/:id` | `{"name"?: string}` | `200 ServerStatus` |
-| DELETE | `/api/servers/:id` | — | `204`。断开 Agent 连接，删除该服务器的所有数据 |
+| DELETE | `/api/servers/:id` | — | `204`。断开 Agent 连接，删除该服务器的所有数据（包括 metrics、alert_state、alert_events），不发送 resolved 通知 |
 | POST | `/api/servers/:id/token` | — | `200 {"token": string}`。轮换 token，断开当前 Agent（关闭码 4003） |
 | GET | `/api/servers/:id/history?range=` | `range` ∈ `1h,6h,24h,7d,30d,90d`，默认 `24h` | `200 History` |
 
@@ -132,8 +133,10 @@ type DashboardEvent =
   | { type: "online"; id: string; agent_version: string | null; host: HostInfo | null }
   | { type: "offline"; id: string; last_seen_ms: number }
   | { type: "metrics"; id: string; frame: MetricsFrame }
+  | { type: "traffic"; id: string; traffic: Traffic }        // 每次写入 Rollup 后推送更新后的本月流量
   | { type: "alert"; kind: "firing" | "resolved"; alert: ActiveAlert };
 ```
+`traffic`：在线服务器的本月流量由 Hub 在连接 attachment 中增量维护（连接建立或跨月时做一次 SUM 重算，之后每次写入新 Rollup 时累加），因此推送不产生额外的 SQLite 读取。
 连接建立后会立即收到一条 `snapshot`。断线重连后，同样用 snapshot 整体替换本地状态。
 
 ## 6. Agent WebSocket
