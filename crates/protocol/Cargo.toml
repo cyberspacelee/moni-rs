@@ -4,8 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# ts-rs does not parse deserialize_with; PATCH nullability is covered by export tests.
+ts = ["dep:ts-rs", "ts-rs/no-serde-warnings"]
+
 [dependencies]
 serde.workspace = true
+ts-rs = { version = "12", optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
