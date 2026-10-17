@@ -84,7 +84,7 @@ export function App() {
   };
 
   return (
-    <Layout route={route} admin={admin} onLogout={logout} version={config?.version}>
+    <Layout route={route} admin={admin} onLogout={logout}>
       {route.page === "overview" && <Overview admin={admin} />}
       {route.page === "server" && <ServerDetail id={route.id} admin={admin} />}
       {route.page === "settings" && <Settings tab={route.tab} config={config} />}

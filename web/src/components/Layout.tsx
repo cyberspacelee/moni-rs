@@ -23,14 +23,14 @@ const REPO = "https://github.com/cyberspacelee/moni-rs";
 const AUTHOR = { name: "cyberspacelee", url: "https://github.com/cyberspacelee" };
 const SINCE = 2026;
 
-function Footer({ version, tabBar }: { version?: string; tabBar: boolean }) {
+function Footer({ tabBar }: { tabBar: boolean }) {
   const year = new Date().getFullYear();
   const link = "underline-offset-4 transition-colors hover:text-ink hover:underline";
   return (
     // The phone tab bar is fixed; pad the footer so the last line clears it.
     <footer className={cx(tabBar && "pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-0")}>
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6">
-      {/* Phones centre the two groups, links above the copyright; desktop splits them left / right. */}
+      {/* Phones centre the two items, GitHub above the copyright; desktop splits them left / right. */}
       <div className="flex flex-col-reverse items-center gap-2 border-t border-line pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-xs leading-5 text-ink-3 sm:flex-row sm:justify-between sm:py-6">
         <p className="tabular">
           © {year > SINCE ? `${SINCE}–${year}` : SINCE}{" "}
@@ -39,13 +39,9 @@ function Footer({ version, tabBar }: { version?: string; tabBar: boolean }) {
           </a>
         </p>
         <nav aria-label="项目链接" className="flex items-center gap-5">
-          {version && <span className="tabular">v{version}</span>}
           <a className={cx(link, "inline-flex items-center gap-1.5")} href={REPO} target="_blank" rel="noreferrer">
             <IconGitHub size={14} />
             GitHub
-          </a>
-          <a className={link} href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">
-            MIT License
           </a>
         </nav>
       </div>
@@ -58,13 +54,11 @@ export function Layout({
   route,
   admin,
   onLogout,
-  version,
   children,
 }: {
   route: Route;
   admin: boolean;
   onLogout: () => void;
-  version?: string;
   children: ReactNode;
 }) {
   const { alerts } = useLive();
@@ -137,7 +131,7 @@ export function Layout({
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 sm:py-8">{children}</main>
-      <Footer version={version} tabBar={nav.length > 1} />
+      <Footer tabBar={nav.length > 1} />
       {nav.length > 1 && (
         // Thumb-reachable tab bar on phones; the header nav takes over from sm up.
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md sm:hidden">

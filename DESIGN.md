@@ -133,7 +133,7 @@ The Apple system stack with PingFang SC for Chinese; no web fonts. Every figure 
 
 ## Layout
 
-Max width 1280px with 16px / 24px gutters. Overview: a summary strip (2 → 4 columns) over a server grid (1 → 2 → 3). Detail: six readings (2 → 3 → 6), the CPU chart across the full width, then the other charts two-up. Strips draw hairlines with 1px grid gaps over a Line-coloured ground. Phones get a bottom tab bar and the footer pads itself to clear it. The footer holds only © year + author, version, GitHub and the license.
+Max width 1280px with 16px / 24px gutters. Overview: a summary strip (2 → 4 columns) over a server grid (1 → 2 → 3). Detail: six readings (2 → 3 → 6), the CPU chart across the full width, then the other charts two-up. Strips draw hairlines with 1px grid gaps over a Line-coloured ground. Phones get a bottom tab bar and the footer pads itself to clear it. The footer holds only © year + author and a GitHub link.
 
 ## Elevation & Depth
 
