@@ -42,20 +42,30 @@ export function ServerDetail({ id }: { id: string }) {
   const now = useNow();
   const s = servers.get(id);
   const [range, setRange] = useState<HistoryRange>("24h");
-  const [history, setHistory] = useState<History | null>(null);
+  // Keep the query a result belongs to, so a failed switch never shows another query's data.
+  const [loaded, setLoaded] = useState<{ key: string; history: History } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const queryKey = `${id}\u0000${range}`;
+  const history = loaded?.key === queryKey ? loaded.history : null;
+
   useEffect(() => {
     let alive = true;
+    const key = `${id}\u0000${range}`;
     const load = () => {
       setLoading(true);
       api
         .history(id, range)
-        .then((h) => alive && (setHistory(h), setError("")))
-        .catch((e) => alive && setError(errorText(e)))
+        .then((h) => {
+          if (!alive) return;
+          setLoaded({ key, history: h });
+          setError("");
+        })
+        .catch((e) => alive && setError(`${range} 历史加载失败：${errorText(e)}`))
         .finally(() => alive && setLoading(false));
     };
+    setError("");
     load();
     // Minute rollups land once a minute; refresh short ranges accordingly.
     const t = range === "1h" || range === "6h" ? window.setInterval(load, 60_000) : undefined;

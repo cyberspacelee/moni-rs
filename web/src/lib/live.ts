@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { ActiveAlert, DashboardEvent, ServerStatus } from "../api/generated";
+import { api } from "./api";
 
 export type ConnState = "connecting" | "open" | "closed";
 
@@ -84,8 +85,10 @@ function open() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const sock = new WebSocket(`${proto}://${location.host}/ws/dashboard`);
   ws = sock;
+  let opened = false;
   set({ conn: "connecting" });
   sock.onopen = () => {
+    opened = true;
     retryMs = 1000;
     set({ conn: "open" });
   };
@@ -101,6 +104,9 @@ function open() {
     ws = null;
     set({ conn: "closed" });
     if (!wanted) return;
+    // A rejected handshake may mean the session expired; the API client raises the
+    // unauthorized event on 401, which sends the app back to the login screen.
+    if (!opened) void api.me().catch(() => undefined);
     retryTimer = window.setTimeout(open, retryMs + Math.random() * 500);
     retryMs = Math.min(retryMs * 2, 30_000);
   };

@@ -9,8 +9,17 @@ export type Route =
 export type SettingsTab = "servers" | "alerts" | "events" | "notify";
 const TABS: SettingsTab[] = ["servers", "alerts", "events", "notify"];
 
+function decode(part: string): string | null {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return null; // malformed percent-encoding
+  }
+}
+
 function parse(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decode);
+  if (parts.some((p) => p == null)) return { page: "overview" };
   if (parts[0] === "server" && parts[1]) return { page: "server", id: parts[1] };
   if (parts[0] === "settings") {
     const tab = TABS.find((t) => t === parts[1]) ?? "servers";
