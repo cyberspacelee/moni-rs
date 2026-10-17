@@ -29,7 +29,7 @@ jobs:
       - run: cargo test -p moni-worker --lib
       - run: cargo test -p moni-protocol --features ts
       - run: git diff --exit-code web/src/api/generated
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -41,7 +41,7 @@ jobs:
         working-directory: web
       - name: Cache worker-build
         id: wb-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/worker-build
           key: worker-build-${{ runner.os }}-${{ runner.arch }}-${{ env.WORKER_BUILD_VERSION }}

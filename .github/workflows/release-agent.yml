@@ -28,7 +28,7 @@ jobs:
           cp target/aarch64-unknown-linux-musl/release/moni-agent dist/moni-agent-linux-arm64
           cp scripts/install-agent.sh dist/
           (cd dist && sha256sum moni-agent-linux-amd64 moni-agent-linux-arm64 install-agent.sh > SHA256SUMS)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: moni-agent
           path: dist/*
