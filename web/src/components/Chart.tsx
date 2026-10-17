@@ -20,6 +20,17 @@ type Props = {
   height?: number;
 };
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** Axis tick label: clock time for short spans, month-day for multi-day spans. */
+function timeLabel(sec: number, spanSec: number): string {
+  const d = new Date(sec * 1000);
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const md = `${d.getMonth() + 1}/${d.getDate()}`;
+  if (spanSec <= 2 * 86400) return d.getHours() === 0 && d.getMinutes() === 0 ? md : hm;
+  return md;
+}
+
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /** Time-series panel: one y-axis, ≤2 series, crosshair with live legend values. */
@@ -41,7 +52,16 @@ export function Chart({ title, xs, series, format, yMax, height = 180 }: Props) 
       legend: { live: true, show: true },
       scales: { x: { time: true }, y: { range: (_u, min, max) => [Math.min(0, min), yMax ?? (max > 0 ? max * 1.1 : 1)] } },
       axes: [
-        { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font: "11px system-ui" },
+        {
+          stroke: axis,
+          grid: { stroke: grid, width: 1 },
+          ticks: { show: false },
+          font: "11px system-ui",
+          values: (u, splits) => {
+            const span = (u.scales.x?.max ?? 0) - (u.scales.x?.min ?? 0);
+            return splits.map((v) => timeLabel(v, span));
+          },
+        },
         {
           stroke: axis,
           grid: { stroke: grid, width: 1 },

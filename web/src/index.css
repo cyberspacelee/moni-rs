@@ -47,3 +47,33 @@
   --chart-grid: #27272a;
   --chart-axis: #a1a1aa;
 }
+
+/* Compact, quiet uPlot legend: values in text ink, the colour swatch carries identity. */
+.u-legend {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.u-legend .u-label {
+  font-weight: 400;
+  color: var(--chart-axis);
+}
+.u-legend .u-value {
+  font-variant-numeric: tabular-nums;
+}
+/* uPlot paints the marker border in the series colour; show it as a short line swatch. */
+.u-legend .u-marker {
+  width: 12px;
+  height: 6px;
+  border-width: 0 0 3px 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+}
+.u-legend th {
+  font-weight: 400;
+}
+.u-legend .u-series:first-child .u-value {
+  color: var(--chart-axis);
+}
+.u-legend .u-series:first-child .u-marker {
+  display: none;
+}

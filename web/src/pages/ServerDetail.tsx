@@ -116,7 +116,9 @@ export function ServerDetail({ id }: { id: string }) {
         </a>
         <h1 className="text-xl font-semibold">{s.name}</h1>
         <StatusDot online={s.online} />
-        {!s.online && <span className="text-xs text-zinc-500">最后在线 {ago(s.last_seen_ms, now)}</span>}
+        {!s.online && (
+          <span className="text-xs text-zinc-500">{s.last_seen_ms ? `最后在线 ${ago(s.last_seen_ms, now)}` : "Agent 尚未连接"}</span>
+        )}
         {firing.map((a) => (
           <Badge key={a.rule_id} tone="critical">
             ⚠ {a.rule_name}
