@@ -1,16 +1,21 @@
-# Fork 后一键部署：在仓库 Settings → Secrets and variables → Actions 中配置
-#   CLOUDFLARE_API_TOKEN   (模板 "Edit Cloudflare Workers")
-#   CLOUDFLARE_ACCOUNT_ID
-#   AGENT_SECRET           (Agent 共享密钥，PoC 阶段)
-#   ADMIN_TOKEN            (看板 / API 访问令牌)
-# 然后在 Actions 页面手动运行本 workflow。
 name: Deploy
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["crates/worker/**", "crates/protocol/**", "Cargo.lock", ".github/workflows/deploy.yml"]
+    paths:
+      - "crates/worker/**"
+      - "crates/protocol/**"
+      - "web/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: read
 
 concurrency:
   group: deploy
@@ -27,11 +32,27 @@ jobs:
       - name: Check secrets
         id: guard
         env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::warning::CLOUDFLARE_API_TOKEN 未配置，跳过部署"
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID 未配置，跳过部署。请在仓库 Actions Secrets 中配置。"
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo '部署已跳过：请配置 CLOUDFLARE_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID。' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for name in ADMIN_PASSWORD AUTH_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name 为必填 Actions Secret；部署前请在 Settings → Secrets and variables → Actions 中配置。"
+              exit 1
+            fi
+          done
+          export LC_ALL=C
+          if [ "${#AUTH_SECRET}" -lt 32 ]; then
+            echo '::error::AUTH_SECRET 至少需要 32 字节；可用 openssl rand -hex 32 生成。'
+            exit 1
           fi
 
       - uses: actions/checkout@v6
@@ -51,7 +72,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/worker-build
-          key: worker-build-${{ env.WORKER_BUILD_VERSION }}
+          key: worker-build-${{ runner.os }}-${{ runner.arch }}-${{ env.WORKER_BUILD_VERSION }}
 
       - name: Install worker-build
         if: steps.guard.outputs.skip != 'true' && steps.wb-cache.outputs.cache-hit != 'true'
@@ -62,18 +83,29 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
 
       - name: Install wrangler
         if: steps.guard.outputs.skip != 'true'
         run: npm ci
 
+      - name: Build web
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: web
+        run: npm ci && npm run build
+
       - name: Deploy
         if: steps.guard.outputs.skip != 'true'
+        shell: bash
         working-directory: crates/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: ../../node_modules/.bin/wrangler deploy
+        run: |
+          ../../node_modules/.bin/wrangler deploy --var "AGENT_RELEASE_REPO:${{ github.repository }}" \
+            | tee "$RUNNER_TEMP/moni-deploy.log"
 
       - name: Sync secrets
         if: steps.guard.outputs.skip != 'true'
@@ -81,15 +113,44 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
-          f="$RUNNER_TEMP/secrets.json"
-          node -e '
-            const out = {};
-            for (const k of ["AGENT_SECRET", "ADMIN_TOKEN"]) if (process.env[k]) out[k] = process.env[k];
-            require("fs").writeFileSync(process.argv[1], JSON.stringify(out));
-            console.log("secrets to sync:", Object.keys(out).join(", ") || "(none)");
-          ' "$f"
-          if [ "$(cat "$f")" != "{}" ]; then ../../node_modules/.bin/wrangler secret bulk "$f"; fi
-          rm -f "$f"
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/moni-secrets.XXXXXXXX.json")
+          trap 'rm -f -- "$secret_file"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          node - "$secret_file" <<'JS'
+          const fs = require('node:fs');
+          for (const key of ['ADMIN_PASSWORD', 'AUTH_SECRET']) {
+            if (!process.env[key]) {
+              console.error(`::error::${key} 为必填 Actions Secret，无法同步。`);
+              process.exit(1);
+            }
+          }
+          const keys = ['ADMIN_PASSWORD', 'AUTH_SECRET', 'TG_BOT_TOKEN', 'TG_CHAT_ID', 'WEBHOOK_URL'];
+          const secrets = Object.fromEntries(keys.filter(key => process.env[key]).map(key => [key, process.env[key]]));
+          fs.writeFileSync(process.argv[2], JSON.stringify(secrets));
+          JS
+          ../../node_modules/.bin/wrangler secret bulk "$secret_file"
+
+      - name: Deployment summary
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          node <<'JS'
+          const fs = require('node:fs');
+          const log = fs.readFileSync(`${process.env.RUNNER_TEMP}/moni-deploy.log`, 'utf8');
+          const urls = [...log.matchAll(/^\s+(https:\/\/[a-z0-9.-]+\/?)[ \t]*$/gim)].map(match => match[1]);
+          const url = urls.find(value => value.endsWith('.workers.dev')) ?? urls[0];
+          if (url) {
+            console.log(`Worker URL: ${url}`);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `部署完成，Secrets 已同步。\n\nWorker URL: [${url}](${url})\n`);
+          } else {
+            console.log('::warning::部署成功，但未从 Wrangler 输出解析到 Worker URL，请在 Cloudflare 控制台查看域名。');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '部署完成，Secrets 已同步；域名请查看 Cloudflare 控制台。\n');
+          }
+          JS

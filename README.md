@@ -29,15 +29,19 @@
    | Secret | 说明 |
    |---|---|
    | `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → 模板 “Edit Cloudflare Workers” |
-   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 控制台右侧栏 |
-   | `ADMIN_PASSWORD` | 看板登录密码 |
-   | `AUTH_SECRET` | `openssl rand -hex 32`，用于签名 Cookie 和对 token 做哈希 |
+   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 控制台中的账户 ID |
+   | `ADMIN_PASSWORD` | 必填，看板登录密码 |
+   | `AUTH_SECRET` | 必填，至少 32 字节；用 `openssl rand -hex 32` 生成，用于签名 Cookie 和对 token 做哈希 |
    | `TG_BOT_TOKEN` / `TG_CHAT_ID` | 可选，Telegram 告警 |
    | `WEBHOOK_URL` | 可选，Webhook 告警 |
 
-3. **Actions → Deploy → Run workflow**。完成后访问 `https://moni-rs.<你的子域>.workers.dev`。
-4. 推送 tag（如 `v0.1.0`）触发 **Release agent**，构建 Agent 并发布到 Release。
+3. **Actions → Deploy → Run workflow**。流程构建前端（含 TypeScript 检查），然后由 Wrangler 执行 `worker-build --release` 并部署 Worker，最后用 `wrangler secret bulk` 同步 Secrets。完成后的 **Actions Summary** 会显示从 Wrangler 输出解析出的 Worker URL。
+4. 推送 tag（如 `v0.1.0`）触发 **Release agent**，用 cargo-zigbuild 构建静态 musl Agent，发布 `moni-agent-linux-amd64`、`moni-agent-linux-arm64`、`install-agent.sh` 和 `SHA256SUMS` 到 GitHub Release。
 5. 在看板 **设置 → 服务器** 中添加服务器，复制生成的安装命令，到 VPS 上执行。
+
+`main` 上的 Worker、协议、前端、Cargo / npm 清单与锁文件、部署 workflow 变更也会自动部署；其他路径的推送不会触发部署。部署时会把当前 Fork 的仓库名注入 `AGENT_RELEASE_REPO`，供看板生成安装命令。
+
+未配置 `CLOUDFLARE_API_TOKEN` 或 `CLOUDFLARE_ACCOUNT_ID` 时，流程会给出 warning 并跳过；Cloudflare 凭据齐全后，缺少 `ADMIN_PASSWORD`、`AUTH_SECRET` 或后者不足 32 字节会在部署前报错。Secret 同步失败会使 workflow 失败，需修复后重新运行；首次部署在同步完成前 API 返回 `503 not_configured`。Secret 临时文件权限为 0600，命令成功或失败后都会删除。
 
 > 国内大陆网络无法直接访问 `*.workers.dev`：在 Worker 设置中绑定一个托管在 Cloudflare 的自定义域名即可。
 
@@ -71,8 +75,36 @@ scripts/e2e.sh                                       # 本地端到端测试
 ```sh
 cp .env.example .env    # 填入 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
 set -a; . ./.env; set +a
-(cd web && npm ci && npm run build) && npm run deploy
+npm ci
+(cd web && npm ci && npm run build)
+npm run deploy -- --var AGENT_RELEASE_REPO:owner/moni-rs  # 替换为实际发布 Agent 的仓库
+
+# 首次部署或更新凭据时，在交互提示中输入值（不要使用开发环境示例值）。
+(cd crates/worker && ../../node_modules/.bin/wrangler secret put ADMIN_PASSWORD)
+(cd crates/worker && ../../node_modules/.bin/wrangler secret put AUTH_SECRET)
+# 可选：同样用 secret put 设置 TG_BOT_TOKEN、TG_CHAT_ID、WEBHOOK_URL
 ```
+
+## 运维
+
+Agent 安装需要 Linux、systemd、root 权限，以及 `curl`、`sha256sum` 和用户管理工具。脚本按架构下载二进制及 `SHA256SUMS`，校验通过后安装；服务以非 root 的 `moni` 用户运行，并启用 systemd 安全加固。token 只写入 `root:moni` 所有、权限为 0640 的 `/etc/moni/agent.env`。
+
+重复执行看板提供的安装命令会更新二进制、连接配置并重启服务，可用于升级。默认下载最新 Release，也可指定版本和首选上报间隔（实际间隔以 Hub Welcome 为准）：
+
+```sh
+curl -fsSL https://github.com/owner/moni-rs/releases/latest/download/install-agent.sh -o install-agent.sh
+sudo sh install-agent.sh --server wss://moni.example.com/ws/agent \
+  --token mn_xxx_yyy --repo owner/moni-rs --interval 5 --version v0.1.0
+systemctl status moni-agent
+journalctl -u moni-agent --since '10 minutes ago'
+sudo sh install-agent.sh --uninstall
+```
+
+卸载会停止并禁用服务，删除二进制、单元文件和 `agent.env`；保留 `moni` 系统账户。无服务时再次卸载也能成功。卸载不会删除看板中的服务器和历史数据，需在看板手动删除。
+
+修改 GitHub Secrets 后需重新运行 **Deploy** 才会同步。未填写的可选通知 Secret 会保留 Worker 上的原值；如需关闭通知，请在 Cloudflare 控制台删除对应 Secret，或在 `crates/worker` 下执行 `../../node_modules/.bin/wrangler secret delete WEBHOOK_URL`（Telegram 同理）。更换 `AUTH_SECRET` 会使所有登录会话和 Agent token 失效，需要重新生成 token 并更新各台 Agent。
+
+本地回归执行 `scripts/e2e.sh`，需要本地开发工具链及 Python 3。脚本使用独立临时状态，覆盖鉴权、CRUD、告警、通知、分钟历史、Worker 重启后的补发及 Agent 冻结后的离线恢复，约需 4–5 分钟；失败时可用 `E2E_KEEP=1 scripts/e2e.sh` 保留日志。安装脚本可用 `sh -n scripts/install-agent.sh` 和 `python3 scripts/test-install-agent.py` 检查，后者使用模拟下载和 systemd，不修改系统配置。
 
 ## License
 
