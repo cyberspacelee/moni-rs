@@ -1,0 +1,49 @@
+@import "tailwindcss";
+@import "uplot/dist/uPlot.min.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+@layer base {
+  html {
+    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+  }
+  body {
+    @apply min-h-dvh;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-emerald-500;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* uPlot legend/axes inherit theme colours */
+.uplot,
+.u-legend {
+  font-family: var(--font-sans);
+  color: inherit;
+}
+
+/* Chart roles — validated with the dataviz palette validator against white / zinc-900 surfaces. */
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --chart-grid: #e4e4e7;
+  --chart-axis: #71717a;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+}
+:root.dark {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --chart-grid: #27272a;
+  --chart-axis: #a1a1aa;
+}
