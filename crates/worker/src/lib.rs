@@ -1,68 +1,30 @@
+mod auth;
+mod error;
 mod hub;
 
+use moni_protocol::api::{ApiErrorCode, AppConfig, AuthMeResponse, Notifications, Retention};
 use worker::*;
 
 pub use hub::Hub;
-
-pub(crate) const H_SERVER_ID: &str = "x-moni-server-id";
 
 #[event(start)]
 fn start() {
     console_error_panic_hook::set_once();
 }
 
-/// Constant-time-ish comparison; good enough for PoC shared secrets.
-fn secret_eq(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-            == 0
+pub(crate) fn var_u32(env: &Env, name: &str, default: u32) -> u32 {
+    env.var(name)
+        .ok()
+        .and_then(|v| v.to_string().parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
 }
 
-fn bearer(req: &Request) -> Option<String> {
-    let h = req.headers().get("authorization").ok().flatten()?;
-    h.strip_prefix("Bearer ").map(str::to_owned)
+pub(crate) fn report_interval(env: &Env) -> u32 {
+    var_u32(env, "REPORT_INTERVAL_S", 5)
 }
 
-fn query_token(req: &Request) -> Option<String> {
-    req.url()
-        .ok()?
-        .query_pairs()
-        .find(|(k, _)| k == "token")
-        .map(|(_, v)| v.into_owned())
-}
-
-/// PoC agent token format: `<server_id>:<AGENT_SECRET>` (see ADR-0005).
-fn auth_agent(req: &Request, env: &Env) -> Option<String> {
-    let secret = env.secret("AGENT_SECRET").ok()?.to_string();
-    let token = bearer(req)?;
-    let (server_id, s) = token.split_once(':')?;
-    let valid_id = !server_id.is_empty()
-        && server_id.len() <= 64
-        && server_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    (valid_id && secret_eq(s, &secret)).then(|| server_id.to_owned())
-}
-
-fn auth_admin(req: &Request, env: &Env) -> bool {
-    let Ok(secret) = env.secret("ADMIN_TOKEN") else {
-        return false;
-    };
-    let secret = secret.to_string();
-    bearer(req)
-        .or_else(|| query_token(req))
-        .is_some_and(|t| secret_eq(&t, &secret))
-}
-
-async fn to_hub(req: Request, env: &Env, server_id: Option<&str>) -> Result<Response> {
-    let mut req = req.clone_mut()?;
-    // Never trust a client-supplied identity header.
-    req.headers_mut()?.delete(H_SERVER_ID)?;
-    if let Some(id) = server_id {
-        req.headers_mut()?.set(H_SERVER_ID, id)?;
-    }
+async fn to_hub(req: Request, env: &Env) -> Result<Response> {
     env.durable_object("HUB")?
         .get_by_name("hub")?
         .fetch_with_request(req)
@@ -77,35 +39,81 @@ fn is_upgrade(req: &Request) -> bool {
         .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
 }
 
+fn config(env: &Env) -> AppConfig {
+    AppConfig {
+        version: env!("CARGO_PKG_VERSION").into(),
+        report_interval_s: report_interval(env),
+        agent_release_repo: env
+            .var("AGENT_RELEASE_REPO")
+            .ok()
+            .map(|v| v.to_string())
+            .filter(|v| !v.is_empty()),
+        retention: Retention {
+            minute_days: var_u32(env, "RETENTION_MINUTE_DAYS", 7),
+            hour_days: var_u32(env, "RETENTION_HOUR_DAYS", 90),
+        },
+        notifications: Notifications {
+            telegram: env.secret("TG_BOT_TOKEN").is_ok() && env.secret("TG_CHAT_ID").is_ok(),
+            webhook: env.secret("WEBHOOK_URL").is_ok(),
+        },
+    }
+}
+
+async fn route(req: Request, env: Env) -> Result<Response> {
+    let path = req.path();
+    if !(path == "/api" || path.starts_with("/api/") || path == "/ws" || path.starts_with("/ws/")) {
+        return env.assets("ASSETS")?.fetch_request(req).await;
+    }
+    if path == "/api/health" && req.method() == Method::Get {
+        return Response::from_json(&"ok");
+    }
+    let Some(secrets) = auth::Secrets::load(&env) else {
+        return error::error(
+            503,
+            ApiErrorCode::NotConfigured,
+            "ADMIN_PASSWORD and AUTH_SECRET (at least 32 bytes) are required",
+        );
+    };
+    let mut req = req.clone_mut()?;
+    req.headers_mut()?.delete(auth::H_SERVER_ID)?;
+    req.headers_mut()?.delete(auth::H_TOKEN_HASH)?;
+    if path == "/ws/agent" && req.method() == Method::Get {
+        let Some(token) = auth::bearer(&req) else {
+            return error::unauthorized();
+        };
+        let Some(id) = auth::agent_id(&token) else {
+            return error::unauthorized();
+        };
+        if !is_upgrade(&req) {
+            return error::bad_request("Expected WebSocket upgrade");
+        }
+        req.headers_mut()?.set(auth::H_SERVER_ID, id)?;
+        req.headers_mut()?
+            .set(auth::H_TOKEN_HASH, &auth::token_hash(&secrets.key, &token)?)?;
+        // The Hub needs only the keyed hash, never the original credential.
+        req.headers_mut()?.delete("authorization")?;
+        return to_hub(req, &env).await;
+    }
+    if path == "/api/auth/login" && req.method() == Method::Post {
+        return to_hub(req, &env).await;
+    }
+    if !auth::is_admin(&req, &secrets) {
+        return error::unauthorized();
+    }
+    match (req.method(), path.as_str()) {
+        (Method::Post, "/api/auth/logout") => auth::session_response(&req, &secrets.key, true),
+        (Method::Get, "/api/auth/me") => Response::from_json(&AuthMeResponse {
+            authenticated: true,
+        }),
+        (Method::Get, "/api/config") => Response::from_json(&config(&env)),
+        (Method::Get, "/ws/dashboard") if !is_upgrade(&req) => {
+            error::bad_request("Expected WebSocket upgrade")
+        }
+        _ => to_hub(req, &env).await,
+    }
+}
+
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
-    let path = req.path();
-    match path.as_str() {
-        "/api/health" => Response::ok("ok"),
-        "/ws/agent" => {
-            if !is_upgrade(&req) {
-                return Response::error("expected websocket", 426);
-            }
-            match auth_agent(&req, &env) {
-                Some(id) => to_hub(req, &env, Some(&id)).await,
-                None => Response::error("unauthorized", 401),
-            }
-        }
-        "/ws/dashboard" => {
-            if !is_upgrade(&req) {
-                return Response::error("expected websocket", 426);
-            }
-            if !auth_admin(&req, &env) {
-                return Response::error("unauthorized", 401);
-            }
-            to_hub(req, &env, None).await
-        }
-        p if p.starts_with("/api/") => {
-            if !auth_admin(&req, &env) {
-                return Response::error("unauthorized", 401);
-            }
-            to_hub(req, &env, None).await
-        }
-        _ => env.assets("ASSETS")?.fetch_request(req).await,
-    }
+    error::finish(route(req, env).await)
 }
