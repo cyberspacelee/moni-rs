@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { useLive } from "../lib/live";
 import { href, type Route } from "../lib/router";
-import { setTheme, useTheme } from "../lib/theme";
-import { IconAlert, IconGitHub, IconLogOut, IconMoon, IconOverview, IconSliders, IconSun, Logo } from "./icons";
+import { IconAlert, IconGitHub, IconLogOut, IconOverview, IconPalette, IconSliders, Logo } from "./icons";
+import { ThemePicker } from "./ThemePicker";
 import { Button, cx } from "./ui";
 
 function ConnIndicator() {
@@ -59,7 +59,7 @@ export function Layout({
   children: ReactNode;
 }) {
   const { alerts } = useLive();
-  const theme = useTheme();
+  const [picker, setPicker] = useState(false);
   const nav = [
     { label: "总览", icon: <IconOverview />, to: href({ page: "overview" }), active: route.page === "overview" || route.page === "server" },
     ...(admin
@@ -68,7 +68,7 @@ export function Layout({
   ];
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-bg/90 pt-[env(safe-area-inset-top)] backdrop-blur-md">
+      <header className="site-header sticky top-0 z-30 border-b border-line bg-bg/90 pt-[env(safe-area-inset-top)] backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-4 sm:gap-4 sm:px-6">
           <a href="#/" className="flex h-8 items-center gap-2 font-semibold tracking-tight">
             <Logo className="size-6" />
@@ -95,7 +95,7 @@ export function Layout({
             {admin && alerts.length > 0 && (
               <a
                 href={href({ page: "settings", tab: "events" })}
-                className="tabular inline-flex h-8 items-center gap-1.5 rounded-full bg-crit-soft px-3 text-xs leading-none font-medium text-crit"
+                className="tabular inline-flex h-8 items-center gap-1.5 rounded-pill bg-crit-soft px-3 text-xs leading-none font-medium text-crit"
               >
                 <IconAlert size={14} />
                 {alerts.length}
@@ -106,11 +106,11 @@ export function Layout({
             <Button
               size="icon"
               variant="ghost"
-              aria-label="切换主题"
-              title="切换主题"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label="外观"
+              title="外观"
+              onClick={() => setPicker(true)}
             >
-              {theme === "dark" ? <IconSun /> : <IconMoon />}
+              <IconPalette />
             </Button>
             {admin ? (
               <Button size="icon" variant="ghost" aria-label="退出" title="退出" onClick={onLogout}>
@@ -119,7 +119,7 @@ export function Layout({
             ) : (
               <a
                 href={href({ page: "login" })}
-                className="ml-1 inline-flex h-8 items-center rounded-full bg-ink px-4 text-sm leading-none font-medium text-bg hover:opacity-85"
+                className="ml-1 inline-flex h-8 items-center rounded-pill bg-ink px-4 text-sm leading-none font-medium text-bg hover:opacity-85"
               >
                 登录
               </a>
@@ -129,6 +129,7 @@ export function Layout({
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 sm:py-8">{children}</main>
       <Footer tabBar={nav.length > 1} />
+      <ThemePicker open={picker} onClose={() => setPicker(false)} />
       {nav.length > 1 && (
         // Thumb-reachable tab bar on phones; the header nav takes over from sm up.
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md sm:hidden">

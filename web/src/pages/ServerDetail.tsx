@@ -63,10 +63,10 @@ function Reading({ label, value, sub, level }: { label: string; value: ReactNode
   return (
     <div className="min-w-0 bg-surface px-5 py-4">
       <div className="text-xs leading-4 text-ink-3">{label}</div>
-      <div className="tabular mt-1.5 truncate text-lg leading-7 font-semibold tracking-tight">{value}</div>
+      <div className="hero-num tabular mt-1.5 truncate text-lg leading-7 font-semibold tracking-tight">{value}</div>
       {sub && <div className="tabular truncate text-xs leading-4 text-ink-3">{sub}</div>}
       {level !== undefined && (
-        <div aria-hidden className="mt-2.5 h-1 overflow-hidden rounded-full bg-surface-2">
+        <div aria-hidden className="meter-track mt-2.5 h-1 overflow-hidden rounded-full bg-surface-2">
           <div
             className="h-full rounded-full transition-[width] duration-500"
             style={{ width: `${Math.min(100, Math.max(0, level ?? 0))}%`, background: levelColor(level ?? null) }}
@@ -254,7 +254,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_1px_2px_rgb(20_20_19/0.04)] md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-px overflow-hidden card rounded-2xl border border-line bg-line shadow-card md:grid-cols-3 xl:grid-cols-6">
         <Reading label="CPU" value={pctText(m?.cpu_pct)} sub={s.host ? `${s.host.cpu_cores} 核` : undefined} level={m?.cpu_pct ?? null} />
         <Reading
           label="内存"

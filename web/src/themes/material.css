@@ -1,0 +1,62 @@
+/* Google Material 3 — tonal surfaces instead of outlines, large radii, pill controls. */
+[data-theme="material"] {
+  --bg: #f8fafd;
+  --surface: #ffffff;
+  --surface-2: #e9eef6;
+  --line: #e8eef8;
+  --line-strong: #c5d3e8;
+  --ink: #1c2738;
+  --ink-2: #445369;
+  --ink-3: #647186;
+  --brand: #1a73e8;
+  --brand-strong: #145cbd;
+  --brand-soft: #c2e7ff;
+  --brand-ink: #155bbb;
+  --on-brand: #ffffff;
+  --series-1: #1a73e8;
+  --series-2: #7c59ae;
+  --chart-grid: #e5ebf5;
+  --chart-axis: #647186;
+  --status-good: #188038;
+  --status-warning: #f9ab00;
+  --status-critical: #d93025;
+  --status-good-soft: #e3f2e5;
+  --status-critical-soft: #fce6e3;
+
+  --font-sans: "Google Sans", Roboto, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --radius-md: 999px;
+  --radius-lg: 999px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --card-shadow: 0 2px 8px rgb(26 55 95 / 0.04);
+  --card-shadow-hover: 0 5px 20px rgb(26 55 95 / 0.12);
+}
+[data-theme="material"].dark {
+  --bg: #131314;
+  --surface: #1e1f20;
+  --surface-2: #282a2c;
+  --line: #303234;
+  --line-strong: #53565a;
+  --ink: #e3e3e3;
+  --ink-2: #c4c7c5;
+  --ink-3: #a8acae;
+  --brand: #a8c7fa;
+  --brand-strong: #c2d7fc;
+  --brand-soft: #004a77;
+  --brand-ink: #c2e7ff;
+  --on-brand: #062e6f;
+  --series-1: #a8c7fa;
+  --series-2: #c7a9ef;
+  --chart-grid: #343638;
+  --chart-axis: #a8acae;
+  --status-good: #81c995;
+  --status-warning: #fdd663;
+  --status-critical: #f28b82;
+  --status-good-soft: #1d3b2b;
+  --status-critical-soft: #482b2e;
+  --card-shadow: none;
+  --card-shadow-hover: 0 5px 20px rgb(0 0 0 / 0.35);
+}
+[data-theme="material"] .card {
+  border-color: transparent;
+}

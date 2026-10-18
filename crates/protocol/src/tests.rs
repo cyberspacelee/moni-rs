@@ -205,6 +205,32 @@ fn config_and_server_dtos_match_api() {
 }
 
 #[test]
+fn appearance_dtos_match_api() {
+    let public: PublicInfo = assert_roundtrip(json!({
+        "enabled": true,
+        "appearance": {"theme": "cyberpunk", "mode": "dark", "locked": true}
+    }));
+    assert!(public.appearance.valid());
+    assert_eq!(
+        serde_json::to_value(Appearance::default()).unwrap(),
+        json!({"theme": "clay", "mode": "system", "locked": false})
+    );
+    assert!(
+        serde_json::from_value::<Appearance>(
+            json!({"theme": "x", "mode": "auto", "locked": false})
+        )
+        .is_err()
+    );
+    for theme in ["", "Clay", "a b", "../x", &"a".repeat(33)] {
+        let appearance = Appearance {
+            theme: theme.into(),
+            ..Appearance::default()
+        };
+        assert!(!appearance.valid(), "{theme:?}");
+    }
+}
+
+#[test]
 fn history_dtos_match_api() {
     let point = json!({
         "ts_ms": NOW_MS, "cpu_avg": 12.5, "cpu_max": 25.0,
@@ -254,7 +280,6 @@ fn alert_dtos_match_api() {
 fn request_and_response_dtos_match_api() {
     assert_roundtrip::<LoginRequest>(json!({"password": "example-password"}));
     assert_roundtrip::<AuthMeResponse>(json!({"authenticated": true}));
-    assert_roundtrip::<PublicInfo>(json!({"enabled": true}));
     for id in [Value::Null, json!("vps-1")] {
         assert_roundtrip::<CreateServerRequest>(json!({"name": "VPS 1", "id": id}));
     }

@@ -309,6 +309,50 @@ pub struct AuthMeResponse {
 #[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
 pub struct PublicInfo {
     pub enabled: bool,
+    pub appearance: Appearance,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+/// Site-wide default look. `theme` is a frontend theme id; the server only checks its shape so
+/// adding a theme never needs a backend release, and unknown ids fall back in the browser.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export_to = "web/src/api/generated/"))]
+pub struct Appearance {
+    pub theme: String,
+    pub mode: ThemeMode,
+    /// Visitors cannot pick another theme; light/dark stays theirs.
+    pub locked: bool,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: "clay".into(),
+            mode: ThemeMode::System,
+            locked: false,
+        }
+    }
+}
+
+impl Appearance {
+    pub fn valid(&self) -> bool {
+        (1..=32).contains(&self.theme.len())
+            && self
+                .theme
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

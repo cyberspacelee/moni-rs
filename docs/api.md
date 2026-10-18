@@ -19,7 +19,7 @@
 | POST | `/api/auth/logout` | — | `204`，清除 Cookie |
 | GET | `/api/auth/me` | — | `200 {"authenticated": true}`，或 `401` |
 | GET | `/api/health` | — | `200 "ok"`（无需鉴权） |
-| GET | `/api/public` | — | `200 {"enabled": boolean}`（无需鉴权），即 `PUBLIC_DASHBOARD` 是否开启 |
+| GET | `/api/public` | — | `200 {"enabled": boolean, "appearance": Appearance}`（无需鉴权）。`enabled` 即 `PUBLIC_DASHBOARD` 是否开启；`appearance` 见 §2.1。响应带 `Cache-Control: public, max-age=60` 并写入边缘缓存 |
 
 ## 2. 配置
 
@@ -32,6 +32,25 @@ type AppConfig = {
   retention: { minute_days: number; hour_days: number };
   notifications: { telegram: boolean; webhook: boolean };
 };
+```
+
+### 2.1 外观
+
+站点默认外观存在 Hub `meta` 表（`k = 'appearance'`），只在管理员保存时写入。
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| GET | `/api/appearance` | — | `200 Appearance` |
+| PUT | `/api/appearance` | `Appearance` | `200 Appearance`；`theme` 不合法返回 `400 bad_request`。成功后清除当前边缘节点的 `/api/public` 缓存，其他节点最多 60 秒后生效 |
+
+```ts
+type ThemeMode = "light" | "dark" | "system";
+type Appearance = {
+  theme: string;      // 前端主题 id，1–32 位小写字母/数字/-；未知 id 由前端回退到 "clay"
+  mode: ThemeMode;    // 默认明暗；仅暗色主题忽略此项
+  locked: boolean;    // true 时访客不能换主题，只能切换明暗
+};
+// 未设置时：{"theme": "clay", "mode": "system", "locked": false}
 ```
 
 ## 3. 服务器

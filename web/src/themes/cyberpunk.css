@@ -1,0 +1,44 @@
+/* 赛博朋克 — dark only. Neon cyan on violet-black, magenta second series, clipped corners. */
+[data-theme="cyberpunk"] {
+  --bg: #0a0a12;
+  --surface: #11111e;
+  --surface-2: #1b1b2b;
+  --line: #263844;
+  --line-strong: #00a5b0;
+  --ink: #e9fbff;
+  --ink-2: #b3ced7;
+  --ink-3: #8299ad;
+  --brand: #00f0ff;
+  --brand-strong: #7cf7ff;
+  --brand-soft: #10323a;
+  --brand-ink: #00f0ff;
+  --on-brand: #0a0a12;
+  --series-1: #00f0ff;
+  --series-2: #ff2a6d;
+  --chart-grid: #25303e;
+  --chart-axis: #8299ad;
+  --status-good: #00e6b8;
+  --status-warning: #f5e663;
+  --status-critical: #ff2a6d;
+  --status-good-soft: #10312d;
+  --status-critical-soft: #361323;
+
+  --font-sans: var(--font-mono);
+  --radius-md: 0px;
+  --radius-lg: 2px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-pill: 2px;
+  --card-shadow: 0 0 0 1px rgb(0 240 255 / 0.2), 0 0 16px rgb(0 240 255 / 0.05);
+  --card-shadow-hover: 0 0 0 1px rgb(0 240 255 / 0.65), 0 0 24px rgb(0 240 255 / 0.12);
+}
+[data-theme="cyberpunk"] .card {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  background-image: repeating-linear-gradient(0deg, transparent 0 3px, rgb(0 240 255 / 0.03) 3px 4px);
+}
+[data-theme="cyberpunk"] .hero-num {
+  text-shadow: 0 0 8px rgb(0 240 255 / 0.45);
+}
+[data-theme="cyberpunk"] .site-header {
+  border-image: linear-gradient(90deg, var(--brand), var(--series-2)) 1;
+}

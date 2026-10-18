@@ -1,0 +1,45 @@
+/* 终端 — dark only. Phosphor green on black, monospace, square dashed frames, segmented meters. */
+[data-theme="terminal"] {
+  --bg: #000000;
+  --surface: #060b07;
+  --surface-2: #0d1a10;
+  --line: #234d2d;
+  --line-strong: #40804d;
+  --ink: #c0ffd0;
+  --ink-2: #8ad59d;
+  --ink-3: #69b97c;
+  --brand: #33ff66;
+  --brand-strong: #9affb2;
+  --brand-soft: #102c17;
+  --brand-ink: #33ff66;
+  --on-brand: #000000;
+  --series-1: #33ff66;
+  --series-2: #98c9a4;
+  --chart-grid: #183921;
+  --chart-axis: #69b97c;
+  --status-good: #33ff66;
+  --status-warning: #ffb000;
+  --status-critical: #ff5555;
+  --status-good-soft: #0e2915;
+  --status-critical-soft: #321111;
+
+  --font-sans: var(--font-mono);
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-pill: 0px;
+  --card-shadow: none;
+  --card-shadow-hover: none;
+}
+[data-theme="terminal"] .card {
+  border-style: dashed;
+}
+[data-theme="terminal"] .meter-track {
+  height: 0.625rem;
+  border-radius: 0;
+  mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px);
+}
+[data-theme="terminal"] .meter-track > * {
+  border-radius: 0;
+}

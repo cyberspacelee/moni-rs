@@ -1,65 +1,34 @@
 @import "tailwindcss";
 @import "uplot/dist/uPlot.min.css";
 
+/*
+ * Themes: each file under themes/ fills the colour tokens for one `data-theme` id (and its
+ * `.dark` variant), and may reshape the radius scale, fonts and card shadows. Components only
+ * reference tokens; the few decorations a token cannot express hang off `.card`, `.site-header`,
+ * `.hero-num` and `.meter-track`. Adding a theme = one CSS file here + one entry in lib/themes.ts.
+ */
+@import "./themes/clay.css";
+@import "./themes/cyberpunk.css";
+@import "./themes/material.css";
+@import "./themes/cloudflare.css";
+@import "./themes/terminal.css";
+@import "./themes/nord.css";
+@import "./themes/geist.css";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
-/*
- * Design tokens. Warm ivory and slate neutrals with one clay accent for actions and selection;
- * green / amber / red stay reserved for state and always travel with a word or an icon.
- */
-:root {
-  --bg: #faf9f5;
-  --surface: #ffffff;
-  --surface-2: #f2f0e9;
-  --line: #e8e6dc;
-  --line-strong: #d6d3c7;
-  --ink: #141413;
-  --ink-2: #4d4c48;
-  --ink-3: #73726c;
-  --brand: #b9532f;
-  --brand-strong: #a14626;
-  --brand-soft: #f7e9e1;
-  --brand-ink: #9a4424;
-
-  /* Chart roles: clay first, a quiet sky blue second — apart in hue and lightness. */
-  --series-1: #c96442;
-  --series-2: #5b8fc4;
-  --chart-grid: #ece9df;
-  --chart-axis: #8a8982;
-  --status-good: #2e7d4f;
-  --status-warning: #b07a12;
-  --status-critical: #c8372d;
-  --status-good-soft: #e6f2ea;
-  --status-critical-soft: #fbe9e7;
-}
-:root.dark {
-  --bg: #1b1a19;
-  --surface: #242322;
-  --surface-2: #2d2c2a;
-  --line: #353431;
-  --line-strong: #46443f;
-  --ink: #f4f3ee;
-  --ink-2: #c4c2b9;
-  --ink-3: #9b9990;
-  --brand: #d97757;
-  --brand-strong: #e48a6c;
-  --brand-soft: rgb(217 119 87 / 0.16);
-  --brand-ink: #eba48b;
-
-  --series-1: #d97757;
-  --series-2: #7fb0e0;
-  --chart-grid: #2e2d2b;
-  --chart-axis: #85837b;
-  --status-good: #5cb87d;
-  --status-warning: #e0a83a;
-  --status-critical: #ec6b5e;
-  --status-good-soft: rgb(92 184 125 / 0.14);
-  --status-critical-soft: rgb(236 107 94 / 0.15);
+/* Defaults the themes override; radius-md/lg are controls, radius-xl/2xl are surfaces, pill is badges. */
+@theme static {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, "PingFang SC", "Microsoft YaHei", monospace;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-pill: 9999px;
 }
 
 @theme inline {
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -72,6 +41,7 @@
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
   --color-brand-ink: var(--brand-ink);
+  --color-on-brand: var(--on-brand);
   --color-good: var(--status-good);
   --color-warn: var(--status-warning);
   --color-crit: var(--status-critical);
@@ -82,7 +52,11 @@
 @layer base {
   html {
     @apply bg-bg text-ink antialiased;
+    color-scheme: light;
     -webkit-tap-highlight-color: transparent;
+  }
+  html.dark {
+    color-scheme: dark;
   }
   body {
     @apply min-h-dvh bg-bg;
@@ -100,6 +74,14 @@
 
 @utility tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Not --shadow-*: Tailwind inlines those at build time, and themes must swap them at runtime. */
+@utility shadow-card {
+  box-shadow: var(--card-shadow);
+}
+@utility shadow-card-hover {
+  box-shadow: var(--card-shadow-hover);
 }
 
 @utility no-scrollbar {

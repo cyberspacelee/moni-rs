@@ -21,7 +21,7 @@ import {
   type LucideIcon,
   type LucideProps,
   MemoryStick,
-  Moon,
+  Palette,
   Pencil,
   Plus,
   Power,
@@ -29,7 +29,6 @@ import {
   Send,
   Server,
   SlidersHorizontal,
-  Sun,
   TriangleAlert,
   Trash2,
   Unplug,
@@ -49,8 +48,7 @@ function icon(Glyph: LucideIcon) {
 
 export const IconOverview = icon(LayoutGrid);
 export const IconSliders = icon(SlidersHorizontal);
-export const IconSun = icon(Sun);
-export const IconMoon = icon(Moon);
+export const IconPalette = icon(Palette);
 export const IconLogIn = icon(LogIn);
 export const IconLogOut = icon(LogOut);
 export const IconAlert = icon(TriangleAlert);
@@ -93,11 +91,12 @@ export function IconGitHub({ size = 16, className }: { size?: number; className?
 export function Logo({ className = "size-7" }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden>
-      <rect width="32" height="32" rx="8" fill="var(--brand)" />
+      {/* Corner follows the theme's surface radius, capped at the mark's own 8/32. */}
+      <rect width="32" height="32" rx="8" style={{ rx: "min(8px, var(--radius-2xl))" }} fill="var(--brand)" />
       <path
         d="M8 21.5v-6.75C8 12.4 9.5 11 11.25 11S14.5 12.4 14.5 14.75v4.75M14.5 14.75c0-2.35 1.5-3.75 3.25-3.75S21 12.4 21 14.75v3.5c0 2 1 3.25 3 3.25"
         fill="none"
-        stroke="#fff"
+        stroke="var(--on-brand)"
         strokeWidth="2.4"
         strokeLinecap="round"
         strokeLinejoin="round"

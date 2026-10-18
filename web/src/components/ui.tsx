@@ -15,7 +15,7 @@ export { cx };
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-brand text-white shadow-[0_1px_2px_rgb(0_0_0/0.1)] hover:bg-brand-strong dark:text-[#1b1a19]",
+    "bg-brand text-on-brand shadow-[0_1px_2px_rgb(0_0_0/0.1)] hover:bg-brand-strong",
   secondary: "border border-line bg-surface text-ink shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-line-strong",
   ghost: "text-ink-2 hover:bg-surface-2 hover:text-ink",
   danger: "text-crit hover:bg-crit-soft",
@@ -63,7 +63,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cx("rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgb(20_20_19/0.04)]", className)}>
+    <div className={cx("card rounded-2xl border border-line bg-surface shadow-card", className)}>
       {children}
     </div>
   );
@@ -97,7 +97,7 @@ export function Badge({
   return (
     <span
       className={cx(
-        "inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px] leading-none font-medium whitespace-nowrap",
+        "inline-flex h-5 items-center gap-1 rounded-pill px-2 text-[11px] leading-none font-medium whitespace-nowrap",
         tones[tone],
         className,
       )}
@@ -127,7 +127,7 @@ export function Meter({ label, value, detail }: { label: string; value: number |
         </span>
       </div>
       <div
-        className="h-1.5 overflow-hidden rounded-full bg-surface-2"
+        className="meter-track h-1.5 overflow-hidden rounded-full bg-surface-2"
         role="meter"
         aria-label={label}
         aria-valuemin={0}

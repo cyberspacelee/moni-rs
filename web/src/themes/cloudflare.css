@@ -1,0 +1,65 @@
+/* Cloudflare — engineering console: denser, small radii, orange only for action and selection. */
+[data-theme="cloudflare"] {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --surface-2: #f0f0f2;
+  --line: #e2e2e6;
+  --line-strong: #c4c5cb;
+  --ink: #1d1d22;
+  --ink-2: #4c4d56;
+  --ink-3: #6c6e79;
+  --brand: #f6821f;
+  --brand-strong: #db6b10;
+  --brand-soft: #fff0e2;
+  --brand-ink: #99500c;
+  --on-brand: #20150b;
+  --series-1: #5e687a;
+  --series-2: #0051c3;
+  --chart-grid: #e7e7eb;
+  --chart-axis: #6c6e79;
+  --status-good: #237d42;
+  --status-warning: #a36b00;
+  --status-critical: #c53333;
+  --status-good-soft: #e8f4eb;
+  --status-critical-soft: #fbe9e9;
+
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 6px;
+  --radius-pill: 4px;
+  --card-shadow: none;
+  --card-shadow-hover: 0 2px 6px rgb(0 0 0 / 0.08);
+}
+[data-theme="cloudflare"].dark {
+  --bg: #171719;
+  --surface: #222225;
+  --surface-2: #2b2b30;
+  --line: #3b3b42;
+  --line-strong: #55555f;
+  --ink: #f3f3f5;
+  --ink-2: #c7c7ce;
+  --ink-3: #9d9da9;
+  --brand-strong: #f99f54;
+  --brand-soft: #3d2d21;
+  --brand-ink: #ffad69;
+  --series-1: #b5bdca;
+  --series-2: #4da3ff;
+  --chart-grid: #38383f;
+  --chart-axis: #9d9da9;
+  --status-good: #6bc28b;
+  --status-warning: #eab95a;
+  --status-critical: #f78383;
+  --status-good-soft: #20392b;
+  --status-critical-soft: #45292c;
+}
+/* Every size is in rem, so a smaller root is the whole density change; phones keep touch sizes. */
+@media (min-width: 640px) {
+  html[data-theme="cloudflare"] {
+    font-size: 15px;
+  }
+}
+[data-theme="cloudflare"] .site-header {
+  border-bottom: 2px solid var(--brand);
+}

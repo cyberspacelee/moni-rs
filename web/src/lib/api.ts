@@ -9,6 +9,7 @@ import type {
   CreateServerResponse,
   History,
   HistoryRange,
+  Appearance,
   PublicInfo,
   ServerStatus,
   TokenResponse,
@@ -54,11 +55,20 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+// Public info never changes within a page's life; one request serves the theme and the role check.
+let publicInfo: Promise<PublicInfo> | undefined;
+
 export const api = {
   login: (password: string) => request<void>("POST", "/api/auth/login", { password }),
   logout: () => request<void>("POST", "/api/auth/logout"),
   me: () => request<{ authenticated: boolean }>("GET", "/api/auth/me"),
-  publicInfo: () => request<PublicInfo>("GET", "/api/public"),
+  publicInfo: () =>
+    (publicInfo ??= request<PublicInfo>("GET", "/api/public").catch((e: unknown) => {
+      publicInfo = undefined;
+      throw e;
+    })),
+  appearance: () => request<Appearance>("GET", "/api/appearance"),
+  setAppearance: (a: Appearance) => request<Appearance>("PUT", "/api/appearance", a),
   config: () => request<AppConfig>("GET", "/api/config"),
 
   servers: () => request<ServerStatus[]>("GET", "/api/servers"),

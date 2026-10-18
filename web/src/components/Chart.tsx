@@ -61,7 +61,7 @@ function areaFill(color: string, strength: number): uPlot.Series.Fill {
 export function Chart({ title, icon, xs, series, format, axisFormat, yMax, window: win, height = 180 }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
-  const theme = useTheme();
+  const { theme, dark } = useTheme();
   const [hover, setHover] = useState<Hover | null>(null);
   // uPlot callbacks are created once per build; read live data through refs.
   const data = useRef({ xs, series, win });
@@ -128,7 +128,7 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
             stroke: color,
             width: 1.75,
             paths: spline,
-            fill: i === 0 ? areaFill(color, theme === "dark" ? 0.2 : 0.12) : undefined,
+            fill: i === 0 ? areaFill(color, dark ? 0.2 : 0.12) : undefined,
             // A line needs two neighbours; isolated samples would otherwise be invisible.
             points: { show: (u: uPlot) => u.data[0].length < 6, size: 5, fill: color },
             spanGaps: false,
@@ -155,7 +155,7 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
     };
     // Rebuild when the shape or theme changes; data-only updates go through setData below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme, series.length, height, yMax, title]);
+  }, [theme, dark, series.length, height, yMax, title]);
 
   useEffect(() => {
     plot.current?.setData([xs, ...series.map((s) => s.values)] as uPlot.AlignedData);

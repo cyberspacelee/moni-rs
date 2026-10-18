@@ -7,8 +7,8 @@ export type Route =
   | { page: "server"; id: string }
   | { page: "settings"; tab: SettingsTab };
 
-export type SettingsTab = "servers" | "alerts" | "events" | "notify";
-const TABS: SettingsTab[] = ["servers", "alerts", "events", "notify"];
+export type SettingsTab = "servers" | "alerts" | "events" | "notify" | "appearance";
+const TABS: SettingsTab[] = ["servers", "alerts", "events", "notify", "appearance"];
 
 function decode(part: string): string | null {
   try {

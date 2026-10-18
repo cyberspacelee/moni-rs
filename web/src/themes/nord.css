@@ -1,0 +1,57 @@
+/* Nord — the official Polar Night / Snow Storm / Frost / Aurora palette; calm and cool. */
+[data-theme="nord"] {
+  --bg: #eceff4;
+  --surface: #e5e9f0;
+  --surface-2: #d8dee9;
+  --line: #d8dee9;
+  --line-strong: #b3bfce;
+  --ink: #2e3440;
+  --ink-2: #434c5e;
+  --ink-3: #657187;
+  --brand: #5e81ac;
+  --brand-strong: #7395bd;
+  --brand-soft: #e5edf5;
+  --brand-ink: #49678b;
+  --on-brand: #0b1018;
+  --series-1: #5e81ac;
+  --series-2: #487f91;
+  --chart-grid: #d8dee9;
+  --chart-axis: #657187;
+  --status-good: #567142;
+  --status-warning: #896914;
+  --status-critical: #a53e4c;
+  --status-good-soft: #e9efdf;
+  --status-critical-soft: #f5e3e6;
+
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-pill: 6px;
+  --card-shadow: none;
+  --card-shadow-hover: 0 5px 16px rgb(46 52 64 / 0.12);
+}
+[data-theme="nord"].dark {
+  --bg: #2e3440;
+  --surface: #3b4252;
+  --surface-2: #434c5e;
+  --line: #4c566a;
+  --line-strong: #65728a;
+  --ink: #eceff4;
+  --ink-2: #d8dee9;
+  --ink-3: #aebbcf;
+  --brand: #88c0d0;
+  --brand-strong: #a3d4e1;
+  --brand-soft: #445b6a;
+  --brand-ink: #9ed3e1;
+  --on-brand: #2e3440;
+  --series-1: #88c0d0;
+  --series-2: #81a1c1;
+  --chart-grid: #4c566a;
+  --chart-axis: #aebbcf;
+  --status-good: #a3be8c;
+  --status-warning: #ebcb8b;
+  --status-critical: #ef9aa2;
+  --status-good-soft: #435344;
+  --status-critical-soft: #503e4a;
+}

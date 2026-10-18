@@ -1,6 +1,6 @@
 use crate::{auth, error, logic};
 use moni_protocol::api::{
-    ApiErrorCode, AppConfig, AuthMeResponse, Notifications, PublicInfo, Retention,
+    ApiErrorCode, AppConfig, Appearance, AuthMeResponse, Notifications, PublicInfo, Retention,
 };
 use worker::*;
 
@@ -77,6 +77,45 @@ async fn public_history(req: Request, env: &Env) -> Result<Response> {
     Ok(response)
 }
 
+fn public_cache_key(req: &Request) -> Result<String> {
+    Ok(format!(
+        "{}/api/public",
+        req.url()?.origin().ascii_serialization()
+    ))
+}
+
+/// Every page load asks for this, so it is edge-cached like public history; a stale minute after
+/// an appearance change is fine, and the admin's own colo is purged on save.
+async fn public_info(req: &Request, env: &Env) -> Result<Response> {
+    let key = public_cache_key(req)?;
+    let cache = Cache::default();
+    if let Some(hit) = cache.get(key.as_str(), false).await? {
+        return Ok(hit);
+    }
+    let url = format!(
+        "{}/api/appearance",
+        req.url()?.origin().ascii_serialization()
+    );
+    let appearance = match to_hub(Request::new(&url, Method::Get)?, env).await {
+        Ok(mut res) if res.status_code() == 200 => res.json::<Appearance>().await.ok(),
+        _ => None,
+    };
+    let cacheable = appearance.is_some();
+    let mut response = Response::from_json(&PublicInfo {
+        enabled: public_dashboard(env),
+        appearance: appearance.unwrap_or_default(),
+    })?;
+    if cacheable {
+        response
+            .headers_mut()
+            .set("cache-control", "public, max-age=60")?;
+        if let Err(error) = cache.put(key.as_str(), response.cloned()?).await {
+            console_warn!("Public info cache write failed: {}", error);
+        }
+    }
+    Ok(response)
+}
+
 fn config(env: &Env) -> AppConfig {
     AppConfig {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -106,9 +145,7 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         return Response::from_json(&"ok");
     }
     if path == "/api/public" && req.method() == Method::Get {
-        return Response::from_json(&PublicInfo {
-            enabled: public_dashboard(&env),
-        });
+        return public_info(&req, &env).await;
     }
     let Some(secrets) = auth::Secrets::load(&env) else {
         return error::error(
@@ -196,6 +233,16 @@ async fn route(req: Request, env: Env) -> Result<Response> {
         (Method::Get, "/ws/dashboard") => {
             req.headers_mut()?.set(auth::H_ADMIN, "1")?;
             to_hub(req, &env).await
+        }
+        (Method::Put, "/api/appearance") => {
+            let key = public_cache_key(&req)?;
+            let response = to_hub(req, &env).await?;
+            if response.status_code() == 200
+                && let Err(error) = Cache::default().delete(key.as_str(), false).await
+            {
+                console_warn!("Public info cache purge failed: {}", error);
+            }
+            Ok(response)
         }
         _ => to_hub(req, &env).await,
     }

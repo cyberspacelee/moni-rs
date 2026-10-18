@@ -1,0 +1,62 @@
+/*
+ * 陶土 — the default and the token contract every theme fills in. Warm ivory and slate neutrals
+ * with one clay accent for actions and selection; green / amber / red stay reserved for state.
+ * `:root` keeps it the fallback for unknown ids; `:where(.dark)` keeps the dark block at
+ * single-attribute weight so a dark-only theme's plain block still wins over it.
+ */
+:root,
+[data-theme="clay"] {
+  --bg: #faf9f5;
+  --surface: #ffffff;
+  --surface-2: #f2f0e9;
+  --line: #e8e6dc;
+  --line-strong: #d6d3c7;
+  --ink: #141413;
+  --ink-2: #4d4c48;
+  --ink-3: #73726c;
+  --brand: #b9532f;
+  --brand-strong: #a14626;
+  --brand-soft: #f7e9e1;
+  --brand-ink: #9a4424;
+  --on-brand: #ffffff;
+
+  /* Chart series are 6-digit hex: the area fill appends an alpha byte. */
+  --series-1: #c96442;
+  --series-2: #5b8fc4;
+  --chart-grid: #ece9df;
+  --chart-axis: #8a8982;
+  --status-good: #2e7d4f;
+  --status-warning: #b07a12;
+  --status-critical: #c8372d;
+  --status-good-soft: #e6f2ea;
+  --status-critical-soft: #fbe9e7;
+
+  --card-shadow: 0 1px 2px rgb(20 20 19 / 0.04);
+  --card-shadow-hover: 0 8px 24px -12px rgb(20 20 19 / 0.18);
+}
+:root:where(.dark),
+[data-theme="clay"].dark {
+  --bg: #1b1a19;
+  --surface: #242322;
+  --surface-2: #2d2c2a;
+  --line: #353431;
+  --line-strong: #46443f;
+  --ink: #f4f3ee;
+  --ink-2: #c4c2b9;
+  --ink-3: #9b9990;
+  --brand: #d97757;
+  --brand-strong: #e48a6c;
+  --brand-soft: rgb(217 119 87 / 0.16);
+  --brand-ink: #eba48b;
+  --on-brand: #1b1a19;
+
+  --series-1: #d97757;
+  --series-2: #7fb0e0;
+  --chart-grid: #2e2d2b;
+  --chart-axis: #85837b;
+  --status-good: #5cb87d;
+  --status-warning: #e0a83a;
+  --status-critical: #ec6b5e;
+  --status-good-soft: rgb(92 184 125 / 0.14);
+  --status-critical-soft: rgb(236 107 94 / 0.15);
+}

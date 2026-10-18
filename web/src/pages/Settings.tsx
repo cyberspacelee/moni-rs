@@ -7,9 +7,11 @@ import type {
   AlertRuleInput,
   AlertTestResponse,
   AppConfig,
+  Appearance,
   ServerStatus,
 } from "../api/generated";
 import { Flag } from "../components/Flag";
+import { MODE_OPTIONS, ThemeList } from "../components/ThemePicker";
 import {
   IconAlert,
   IconBell,
@@ -32,6 +34,7 @@ import {
   Field,
   Input,
   Modal,
+  Segmented,
   Select,
   Spinner,
   StatusDot,
@@ -40,6 +43,8 @@ import {
 import { api, errorText } from "../lib/api";
 import { ago, dateTime } from "../lib/format";
 import { useLive } from "../lib/live";
+import { setSiteAppearance, useTheme } from "../lib/theme";
+import { findTheme } from "../lib/themes";
 import { href, type SettingsTab } from "../lib/router";
 import { useNow } from "../lib/useNow";
 
@@ -48,6 +53,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "alerts", label: "告警规则" },
   { id: "events", label: "告警事件" },
   { id: "notify", label: "通知" },
+  { id: "appearance", label: "外观" },
 ];
 
 export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig | null }) {
@@ -73,6 +79,7 @@ export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig 
       {tab === "alerts" && <AlertsTab />}
       {tab === "events" && <EventsTab />}
       {tab === "notify" && <NotifyTab config={config} />}
+      {tab === "appearance" && <AppearanceTab />}
     </div>
   );
 }
@@ -704,5 +711,75 @@ function NotifyTab({ config }: { config: AppConfig | null }) {
         </p>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- appearance */
+
+function AppearanceTab() {
+  const { dark } = useTheme();
+  const [a, setA] = useState<Appearance | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.appearance().then(setA, (e: unknown) => setError(errorText(e)));
+  }, []);
+
+  if (!a) return error ? <ErrorText>{error}</ErrorText> : <Spinner />;
+  const darkOnly = !!findTheme(a.theme)?.darkOnly;
+  const change = (next: Appearance) => {
+    setA(next);
+    setSaved(false);
+  };
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      setSiteAppearance(await api.setAppearance(a));
+      setSaved(true);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={(e) => void save(e)} className="max-w-2xl space-y-6">
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-medium">站点默认主题</h2>
+          <p className="mt-0.5 text-sm text-ink-3">访客首次打开时使用；访客在顶栏「外观」里的选择只保存在他们自己的浏览器。</p>
+        </div>
+        <Card className="p-2">
+          <ThemeList name="site-theme" value={a.theme} dark={darkOnly || a.mode === "dark" || (a.mode === "system" && dark)} onChange={(theme) => change({ ...a, theme })} />
+        </Card>
+      </section>
+      <section className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">默认明暗</h2>
+          <p className="mt-0.5 text-sm text-ink-3">{darkOnly ? "该主题仅有暗色。" : "跟随系统会按访客设备自动切换。"}</p>
+        </div>
+        {!darkOnly && <Segmented label="默认明暗" value={a.mode} options={MODE_OPTIONS} onChange={(mode) => change({ ...a, mode })} />}
+      </section>
+      <label className="flex items-start gap-3 text-sm">
+        <input type="checkbox" className="mt-0.5 size-4 accent-[var(--brand)]" checked={a.locked} onChange={(e) => change({ ...a, locked: e.target.checked })} />
+        <span>
+          <span className="font-medium">锁定站点主题</span>
+          <span className="mt-0.5 block text-ink-3">访客不能换主题，只能切换明暗。</span>
+        </span>
+      </label>
+      <ErrorText>{error}</ErrorText>
+      <div className="flex items-center gap-3">
+        <Button type="submit" variant="primary" disabled={busy}>
+          {busy ? "保存中…" : "保存"}
+        </Button>
+        <span className="text-xs text-ink-3">{saved ? "已保存，其他访客最多 1 分钟后生效。" : "保存到服务器，对所有访客生效。"}</span>
+      </div>
+    </form>
   );
 }

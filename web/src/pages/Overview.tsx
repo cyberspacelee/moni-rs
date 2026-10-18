@@ -14,7 +14,7 @@ function Reading({ label, children, sub }: { label: string; children: ReactNode;
   return (
     <div className="min-w-0 bg-surface px-5 py-4">
       <div className="text-xs leading-4 text-ink-3">{label}</div>
-      <div className="tabular mt-1 truncate text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">{children}</div>
+      <div className="hero-num tabular mt-1 truncate text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">{children}</div>
       {sub && <div className="tabular mt-0.5 truncate text-xs leading-4 text-ink-3">{sub}</div>}
     </div>
   );
@@ -41,7 +41,7 @@ function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: 
   const live = s.online && m != null;
   return (
     <a href={href({ page: "server", id: s.id })} data-server-card className="group block min-w-0 rounded-2xl">
-      <Card className="flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-150 group-hover:border-line-strong group-hover:shadow-[0_8px_24px_-12px_rgb(20_20_19/0.18)]">
+      <Card className="flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-150 group-hover:border-line-strong group-hover:shadow-card-hover">
         <div className="flex items-start gap-3 px-5 pt-5">
           <div className="min-w-0 flex-1">
             <div className="flex h-5 items-center gap-2">
@@ -65,7 +65,7 @@ function ServerCard({ s, now, recent }: { s: ServerStatus; now: number; recent: 
           <>
             <div className="mt-4 flex items-end gap-4 px-5">
               <div className="shrink-0">
-                <div className="tabular text-3xl leading-8 font-semibold tracking-tight">
+                <div className="hero-num tabular text-3xl leading-8 font-semibold tracking-tight">
                   {cpu == null ? "–" : cpu.toFixed(0)}
                   <span className="ml-0.5 text-base font-normal text-ink-3">%</span>
                 </div>
@@ -136,7 +136,7 @@ export function Overview({ admin }: { admin: boolean }) {
       {/* 1px gaps over a line-coloured ground draw the hairlines between readings at any column count. */}
       <section
         aria-label="汇总"
-        className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_1px_2px_rgb(20_20_19/0.04)] lg:grid-cols-4">
+        className="grid grid-cols-2 gap-px overflow-hidden card rounded-2xl border border-line bg-line shadow-card lg:grid-cols-4">
         <Reading label="在线" sub={list.length - online.length ? `${list.length - online.length} 台离线` : "全部在线"}>
           {online.length}
           <span className="text-base font-normal text-ink-3"> / {list.length}</span>

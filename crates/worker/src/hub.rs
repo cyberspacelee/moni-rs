@@ -1,6 +1,7 @@
 //! Persistent state lives in SQLite; live connection state survives hibernation in attachments.
 
 mod alerts;
+mod appearance;
 mod data;
 mod schema;
 mod servers;
@@ -345,6 +346,8 @@ impl Hub {
             (Method::Get, "/api/agent-updates") => Response::from_json(&self.agent_updates()?),
             (Method::Post, "/api/agent-updates") => self.request_updates(req).await,
             (Method::Post, "/api/servers") => self.create_server(req).await,
+            (Method::Get, "/api/appearance") => Response::from_json(&self.appearance()?),
+            (Method::Put, "/api/appearance") => self.set_appearance(req).await,
             _ => {
                 if let Some(id) = path.strip_prefix("/api/alerts/rules/") {
                     return match req.method() {
