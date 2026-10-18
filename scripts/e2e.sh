@@ -443,8 +443,17 @@ try {
   assert.ok(live.host);
   assert.ok(live.metrics);
   // Anonymous visitors get a redacted, read-only view; everything else stays 401.
-  assert.deepEqual(await (await api('/api/public')).json(), { enabled: true });
-  for (const url of ['/api/servers', '/api/config', '/api/alerts/rules', '/api/alerts/active', '/api/alerts/events'])
+  const defaultAppearance = { theme: 'clay', mode: 'system', locked: false };
+  assert.deepEqual(await (await api('/api/public')).json(), { enabled: true, appearance: defaultAppearance });
+  await api('/api/appearance', 401, { method: 'PUT', headers: { Origin: base }, body: { ...defaultAppearance, theme: 'nord' } });
+  await api('/api/appearance', 400, { method: 'PUT', headers: admin, body: { ...defaultAppearance, theme: 'Not Valid' } });
+  await api('/api/appearance', 400, { method: 'PUT', headers: admin, body: { ...defaultAppearance, mode: 'auto' } });
+  const locked = { theme: 'nord', mode: 'dark', locked: true };
+  assert.deepEqual(await (await api('/api/appearance', 200, { method: 'PUT', headers: admin, body: locked })).json(), locked);
+  // Saving purges this colo's cached public info, so the change is visible at once.
+  assert.deepEqual((await (await api('/api/public')).json()).appearance, locked);
+  await api('/api/appearance', 200, { method: 'PUT', headers: admin, body: defaultAppearance });
+  for (const url of ['/api/servers', '/api/config', '/api/alerts/rules', '/api/alerts/active', '/api/alerts/events', '/api/appearance'])
     await api(url, 401);
   await api(`/api/servers/${server.id}`, 401, { method: 'PATCH', headers: { Origin: base }, body: { name: 'anon' } });
   await api(`/api/servers/${server.id}/token`, 401, { method: 'POST', headers: { Origin: base } });
