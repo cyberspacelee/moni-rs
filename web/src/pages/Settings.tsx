@@ -38,7 +38,7 @@ import { api, errorText } from "@/lib/api";
 import { ago, dateTime } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import { href, navigate, type SettingsTab } from "@/lib/router";
-import { setSiteAppearance, useTheme } from "@/lib/theme";
+import { setSiteAppearance, useTheme, useThemeKey } from "@/lib/theme";
 import { findTheme } from "@/lib/themes";
 import { useNow } from "@/lib/useNow";
 import { cn } from "@/lib/utils";
@@ -52,13 +52,14 @@ const TABS: { id: SettingsTab; label: string }[] = [
 ];
 
 export function Settings({ tab, config }: { tab: SettingsTab; config: AppConfig | null }) {
+  const themeKey = useThemeKey();
   return (
     <div className="space-y-5 sm:space-y-6">
       <h1 className="text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">管理</h1>
       {/* The route owns the tab, so deep links and Back work; the tabs only navigate. */}
       <Tabs value={tab} onValueChange={(t) => navigate({ page: "settings", tab: t as SettingsTab })} className="gap-5 sm:gap-6">
         <div className="no-scrollbar -mx-4 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0">
-          <TabsList variant="line">
+          <TabsList key={themeKey} variant="line">
             {TABS.map((t) => (
               <TabsTrigger key={t.id} value={t.id} className="px-3">
                 {t.label}

@@ -21,6 +21,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { errorText } from "@/lib/api";
+import { useThemeKey } from "@/lib/theme";
 
 /** Online/offline indicator: colour plus text, never colour alone; offline is a hollow ring. */
 export function StatusDot({ online, label = true }: { online: boolean; label?: boolean }) {
@@ -127,8 +128,10 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
   label: string;
 }) {
+  const themeKey = useThemeKey();
   return (
     <ToggleGroup
+      key={themeKey}
       aria-label={label}
       value={[value]}
       // A pill group always has one choice; ignore the "deselect" a second click would send.

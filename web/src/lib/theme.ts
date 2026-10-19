@@ -106,3 +106,13 @@ export const useTheme = () =>
   );
 
 apply();
+
+/**
+ * Changes whenever the resolved look does. Animate UI's sliding highlights copy the selected
+ * item's computed colours into inline styles and never re-read them on a theme switch, so
+ * components that host one remount on this key.
+ */
+export function useThemeKey(): string {
+  const { theme, dark } = useTheme();
+  return `${theme.id}:${dark ? "dark" : "light"}`;
+}
