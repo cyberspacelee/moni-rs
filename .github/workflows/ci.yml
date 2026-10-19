@@ -29,7 +29,7 @@ jobs:
       - run: cargo test -p moni-worker --lib
       - run: cargo test -p moni-protocol --features ts
       - run: git diff --exit-code web/src/api/generated
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v5
         with:
           node-version: 22

@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      miniflare:
+        specifier: 5.20261012.1-beta
+        version: 5.20261012.1-beta
       wrangler:
         specifier: 4.151.1
         version: 4.151.1

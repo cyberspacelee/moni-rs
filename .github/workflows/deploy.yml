@@ -79,7 +79,7 @@ jobs:
         if: steps.guard.outputs.skip != 'true' && steps.wb-cache.outputs.cache-hit != 'true'
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.guard.outputs.skip != 'true'
 
       - uses: actions/setup-node@v5
