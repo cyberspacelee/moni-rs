@@ -1,22 +1,21 @@
+import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, ServerIcon, TriangleAlertIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import type { History, HistoryPoint, HistoryRange, ServerStatus } from "../api/generated";
-import { Chart, type ChartSeries } from "../components/Chart";
-import { Flag, countryName } from "../components/Flag";
-import {
-  IconAlert,
-  IconBack,
-  IconChevron,
-  IconDown,
-  IconHistory,
-  IconServer,
-  IconUp,
-} from "../components/icons";
-import { Badge, Card, EmptyState, ErrorText, PageSpinner, Segmented, Spinner, StatusDot, cx, levelColor } from "../components/ui";
-import { api, errorText } from "../lib/api";
-import { ago, bytes, clockTime, dateTime, duration, pct, pctText, rate } from "../lib/format";
-import { useLive } from "../lib/live";
-import { href, navigate } from "../lib/router";
-import { useNow } from "../lib/useNow";
+import type { History, HistoryPoint, HistoryRange, ServerStatus } from "@/api/generated";
+import { Chart, type ChartSeries } from "@/components/Chart";
+import { EmptyState, ErrorText, MeterBar, PageSpinner, Segmented, StatusDot } from "@/components/common";
+import { Flag, countryName } from "@/components/Flag";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Kbd } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { api, errorText } from "@/lib/api";
+import { ago, bytes, clockTime, dateTime, duration, pct, pctText, rate } from "@/lib/format";
+import { useLive } from "@/lib/live";
+import { href, navigate } from "@/lib/router";
+import { useNow } from "@/lib/useNow";
+import { cn } from "@/lib/utils";
 
 const RANGES: { id: HistoryRange; label: string; hours: number }[] = [
   { id: "1h", label: "1 小时", hours: 1 },
@@ -61,19 +60,30 @@ function shortRate(v: number): string {
 /** One cell of the reading strip; utilisation cells carry a hairline meter under the value. */
 function Reading({ label, value, sub, level }: { label: string; value: ReactNode; sub?: ReactNode; level?: number | null }) {
   return (
-    <div className="min-w-0 bg-surface px-5 py-4">
-      <div className="text-xs leading-4 text-ink-3">{label}</div>
+    <div className="min-w-0 bg-card px-5 py-4">
+      <div className="text-xs leading-4 text-muted-foreground">{label}</div>
       <div className="hero-num tabular mt-1.5 truncate text-lg leading-7 font-semibold tracking-tight">{value}</div>
-      {sub && <div className="tabular truncate text-xs leading-4 text-ink-3">{sub}</div>}
-      {level !== undefined && (
-        <div aria-hidden className="meter-track mt-2.5 h-1 overflow-hidden rounded-full bg-surface-2">
-          <div
-            className="h-full rounded-full transition-[width] duration-500"
-            style={{ width: `${Math.min(100, Math.max(0, level ?? 0))}%`, background: levelColor(level ?? null) }}
-          />
-        </div>
-      )}
+      {sub && <div className="tabular truncate text-xs leading-4 text-muted-foreground">{sub}</div>}
+      {level !== undefined && <MeterBar label={label} value={level} className="mt-2.5 h-1" />}
     </div>
+  );
+}
+
+/** Previous / next server link; the tooltip names the target and its arrow-key shortcut. */
+function StepLink({ to, dir }: { to: ServerStatus; dir: "prev" | "next" }) {
+  const label = `${dir === "prev" ? "上一台" : "下一台"}：${to.name}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<a href={href({ page: "server", id: to.id })} aria-label={label} className={buttonVariants({ variant: "outline", size: "icon" })} />}
+      >
+        {dir === "prev" ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+      </TooltipTrigger>
+      <TooltipContent>
+        {label}
+        <Kbd>{dir === "prev" ? "←" : "→"}</Kbd>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -166,8 +176,8 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
   if (!ready) return <PageSpinner />;
   if (!s)
     return (
-      <EmptyState title="服务器不存在" icon={<IconServer size={18} />}>
-        <a className="font-medium text-brand underline-offset-4 hover:underline" href="#/">
+      <EmptyState title="服务器不存在" icon={<ServerIcon />}>
+        <a className="font-medium text-primary underline-offset-4 hover:underline" href="#/">
           返回总览
         </a>
       </EmptyState>
@@ -201,27 +211,20 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
     <div className="space-y-6 sm:space-y-8">
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-2">
-          <a href="#/" className="-ml-1.5 inline-flex h-8 items-center gap-1 rounded-lg px-1.5 text-sm leading-none text-ink-3 hover:text-ink">
-            <IconBack size={16} />
+          <a href="#/" className={cn(buttonVariants({ variant: "ghost" }), "-ml-2.5 font-normal text-muted-foreground")}>
+            <ChevronLeftIcon data-icon="inline-start" />
             总览
           </a>
           <div className="flex items-center gap-1">
             {admin && (
-              <a
-                href={href({ page: "settings", tab: "servers" })}
-                className="mr-1 inline-flex h-8 items-center rounded-lg border border-line bg-surface px-3 text-sm leading-none font-medium text-ink-2 hover:text-ink"
-              >
+              <a href={href({ page: "settings", tab: "servers" })} className={cn(buttonVariants({ variant: "outline" }), "mr-1")}>
                 管理
               </a>
             )}
             {prev && next && (
               <nav aria-label="切换服务器" className="flex items-center gap-1">
-                <a href={href({ page: "server", id: prev.id })} title={`上一台：${prev.name}（←）`} aria-label={`上一台：${prev.name}`} className="grid size-8 place-items-center rounded-lg border border-line bg-surface text-ink-2 hover:text-ink">
-                  <IconBack size={16} />
-                </a>
-                <a href={href({ page: "server", id: next.id })} title={`下一台：${next.name}（→）`} aria-label={`下一台：${next.name}`} className="grid size-8 place-items-center rounded-lg border border-line bg-surface text-ink-2 hover:text-ink">
-                  <IconChevron size={16} />
-                </a>
+                <StepLink to={prev} dir="prev" />
+                <StepLink to={next} dir="next" />
               </nav>
             )}
           </div>
@@ -232,7 +235,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
               <h1 className="min-w-0 truncate text-xl leading-7 font-semibold tracking-tight sm:text-2xl sm:leading-8">{s.name}</h1>
               <StatusDot online={s.online} />
             </div>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-ink-3">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-muted-foreground">
               {s.country && <Flag code={s.country} className="text-[13px]" />}
               <span>
                 {[
@@ -244,8 +247,8 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
                   .join(" · ")}
               </span>
               {firing.map((a) => (
-                <Badge key={a.rule_id} tone="critical">
-                  <IconAlert size={12} />
+                <Badge key={a.rule_id} variant="destructive">
+                  <TriangleAlertIcon data-icon="inline-start" />
                   {a.rule_name}
                 </Badge>
               ))}
@@ -254,7 +257,7 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-px overflow-hidden card rounded-2xl border border-line bg-line shadow-card md:grid-cols-3 xl:grid-cols-6">
+      <div className="card grid grid-cols-2 gap-px overflow-hidden rounded-2xl border bg-border shadow-card md:grid-cols-3 xl:grid-cols-6">
         <Reading label="CPU" value={pctText(m?.cpu_pct)} sub={s.host ? `${s.host.cpu_cores} 核` : undefined} level={m?.cpu_pct ?? null} />
         <Reading
           label="内存"
@@ -272,13 +275,13 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
           label="网络"
           value={
             <span className="inline-flex items-center gap-1">
-              <IconDown size={16} className="text-ink-3" />
+              <ArrowDownIcon className="size-4 text-muted-foreground" />
               {rate(m?.net_rx_bps)}
             </span>
           }
           sub={
             <span className="inline-flex items-center gap-1">
-              <IconUp size={12} />
+              <ArrowUpIcon className="size-3" />
               {rate(m?.net_tx_bps)}
             </span>
           }
@@ -299,19 +302,19 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <h2 className="flex h-7 items-center gap-2 text-base leading-7 font-semibold tracking-tight">
             历史趋势
-            {loading && <Spinner className="size-3.5" />}
+            {loading && <Spinner className="size-3.5 text-muted-foreground" />}
           </h2>
           <div className="sm:ml-auto">
             <Segmented label="时间范围" value={range} onChange={setRange} options={RANGES} />
           </div>
         </div>
         {charts && (
-          <p className="tabular -mt-1 text-xs text-ink-3">
+          <p className="tabular -mt-1 text-xs text-muted-foreground">
             本区间流量 ↓ {bytes(charts.traffic.rx)} · ↑ {bytes(charts.traffic.tx)}
           </p>
         )}
         <ErrorText>{error}</ErrorText>
-        {charts && history && history.points.length === 0 && <EmptyState title="该时间范围内暂无数据" icon={<IconHistory size={18} />} />}
+        {charts && history && history.points.length === 0 && <EmptyState title="该时间范围内暂无数据" icon={<HistoryIcon />} />}
         {charts && history && history.points.length > 0 && (
           <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
             {/* CPU leads at full width; the rest read as its supporting panels. */}
@@ -330,12 +333,12 @@ export function ServerDetail({ id, admin }: { id: string; admin: boolean }) {
       {hostRows.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-base leading-7 font-semibold tracking-tight">主机信息</h2>
-          <Card>
+          <Card className="py-0">
             <dl className="grid text-sm sm:grid-cols-2">
               {hostRows.map(([k, v], i) => (
-                <div key={k} className={cx("flex items-baseline gap-4 border-line px-5 py-3", i > 0 && "border-t", i === 1 && "sm:border-t-0")}>
-                  <dt className="w-16 shrink-0 leading-5 text-ink-3">{k}</dt>
-                  <dd className={cx("min-w-0 leading-5 break-words", MONO_ROWS.has(k) && "font-mono text-[13px]")}>{v}</dd>
+                <div key={k} className={cn("flex items-baseline gap-4 border-border px-5 py-3", i > 0 && "border-t", i === 1 && "sm:border-t-0")}>
+                  <dt className="w-16 shrink-0 leading-5 text-muted-foreground">{k}</dt>
+                  <dd className={cn("min-w-0 leading-5 break-words", MONO_ROWS.has(k) && "font-mono text-[13px]")}>{v}</dd>
                 </div>
               ))}
             </dl>

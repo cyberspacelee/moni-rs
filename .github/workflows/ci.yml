@@ -29,16 +29,13 @@ jobs:
       - run: cargo test -p moni-worker --lib
       - run: cargo test -p moni-protocol --features ts
       - run: git diff --exit-code web/src/api/generated
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            web/package-lock.json
-      - run: npm ci
-      - run: npm ci && npm run build
-        working-directory: web
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter moni-web build
       - name: Cache worker-build
         id: wb-cache
         uses: actions/cache@v5
@@ -52,7 +49,7 @@ jobs:
         working-directory: crates/worker
       - run: node scripts/test-adaptive-reporting.mjs
       - run: node scripts/test-update-api.mjs
-      - run: npx --prefix web playwright-core install --with-deps chromium
+      - run: pnpm --filter moni-web exec playwright-core install --with-deps chromium
       - run: scripts/e2e.sh --quick --ui
       - run: sh -n scripts/install-agent.sh
       - run: sh -n scripts/update-agent.sh

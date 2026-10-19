@@ -109,7 +109,7 @@ Clean, restrained and enterprise, in the spirit of Apple and Anthropic product p
 ## Colors
 
 ### Primary
-- **Clay** (#b9532f, dark #d97757): primary buttons, active tab underline, focus ring, links, checkbox accent. Clay also fills meters at rest and draws the first chart series (#c96442).
+- **Clay** (#b9532f, dark #d97757): primary buttons, active tab underline, focus ring, links, the on state of switches and radios. Clay also fills meters at rest and draws the first chart series (#c96442).
 
 ### Secondary
 - **Sky** (#5b8fc4, dark #7fb0e0): the second chart series only (peak, swap, upload).
@@ -137,16 +137,19 @@ Max width 1280px with 16px / 24px gutters. Overview: a summary strip (2 → 4 co
 
 ## Elevation & Depth
 
-Panels rest at `0 1px 2px rgb(20 20 19 / 0.04)` with a 1px Line border. Hovered server cards lift to `0 8px 24px -12px rgb(20 20 19 / 0.18)`. The header is Ivory at 90 % with a light backdrop blur so content scrolls under it legibly. Dialogs sit over a 35 % black backdrop.
+Panels rest at `0 1px 2px rgb(20 20 19 / 0.04)` with a 1px Line border. Hovered server cards lift to `0 8px 24px -12px rgb(20 20 19 / 0.18)`. The header is Ivory at 90 % with a light backdrop blur so content scrolls under it legibly. Dialogs sit over a 40 % black backdrop with a light blur; on phones they rise as a swipe-to-dismiss bottom sheet.
 
 ## Shapes
 
-16px panels, 8px controls, 6px segments, pills for status badges, the sign-in button and meters. Icons are Lucide at a 1.5px absolute stroke.
+16px panels, 8px controls, 6px segments, pills for status badges, the sign-in button and meters. Icons are Lucide at their default stroke, sized by the component that holds them (16px in buttons, 14px in small buttons, 12px in badges).
 
 ## Components
 
 - **Server card**: name and alert badge over flag · region · cores · arch, with the status on the right. Below: the CPU figure with a live sparkline, memory and disk meters, then rows for network, monthly traffic and uptime. An offline card says when it was last seen.
-- **Segmented control**: Oat ground; the selected segment is a white raised pill.
+- **Segmented control**: Oat ground; the selected segment is a white raised pill that slides between options.
+- **Dialogs**: forms open in a dialog (bottom sheet on phones) with the actions right-aligned, Cancel before the primary. Irreversible actions ask in an alert dialog whose action names the verb (删除, 轮换). Failures without a form to sit beside appear as a toast.
+- **Tooltips** replace `title` on icon-only controls and the live indicator, and show the keyboard shortcut where one exists.
+- **Motion**: popups, tabs, switches and the segmented highlight animate through Animate UI; everything honours reduced-motion.
 - **Header**: logo + wordmark, text nav (the active item is Slate and medium weight), alert pill, live dot + 实时, theme and sign-out icons, and a pill sign-in for visitors.
 
 ## Do's and Don'ts

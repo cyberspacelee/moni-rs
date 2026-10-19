@@ -1,7 +1,7 @@
 // Browser smoke test against a running Worker: exercises every write the UI performs
 // through the real cookie + Origin path. Usage:
-//   MONI_BASE=http://127.0.0.1:8787 MONI_PASSWORD=dev-admin npm run test:smoke
-// Uses the Playwright-managed Chromium (`npx playwright install chromium`) unless
+//   MONI_BASE=http://127.0.0.1:8787 MONI_PASSWORD=dev-admin pnpm test:smoke
+// Uses the Playwright-managed Chromium (`pnpm exec playwright-core install chromium`) unless
 // CHROME_PATH points at another Chromium build.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
@@ -20,7 +20,15 @@ page.on("response", (r) => {
   if (url.pathname.startsWith("/api/") && r.status() >= 400 && url.pathname !== "/api/auth/me")
     failures.push(`${r.request().method()} ${url.pathname} → ${r.status()}`);
 });
-page.on("dialog", (d) => void d.accept());
+// Confirmations are in-page alert dialogs; a native one would be a regression.
+page.on("dialog", (d) => {
+  failures.push(`native ${d.type()} dialog: ${d.message()}`);
+  void d.dismiss();
+});
+
+const dialog = () => page.getByRole("dialog");
+/** Answers an in-page confirmation by pressing its action button. */
+const confirm = (action) => page.getByRole("alertdialog").getByRole("button", { name: action }).click();
 
 const step = async (label, fn) => {
   await fn();
@@ -43,9 +51,9 @@ try {
     await page.goto(`${base}/#/settings/servers`);
     await page.click("text=添加服务器");
     await page.fill('input[placeholder="例如 香港 01"]', name);
-    await page.click('dialog button[type="submit"]');
+    await dialog().locator('button[type="submit"]').click();
     await page.waitForSelector("text=Token 只显示这一次");
-    const token = await page.locator("dialog code").first().textContent();
+    const token = await page.locator("[data-token]").textContent();
     assert.match(token ?? "", /^mn_[a-z0-9-]+_[A-Za-z0-9_-]{43}$/);
     await page.click("text=我已保存");
   });
@@ -54,13 +62,14 @@ try {
 
   await step("rename server (PATCH JSON)", async () => {
     await row().locator("text=重命名").click();
-    await page.locator("dialog input").fill(`${name}-r`);
-    await page.click('dialog button[type="submit"]');
+    await dialog().locator("input").fill(`${name}-r`);
+    await dialog().locator('button[type="submit"]').click();
     await page.waitForSelector(`text=${name}-r`);
   });
 
   await step("rotate token (bodyless POST)", async () => {
     await row().locator("text=轮换 Token").click();
+    await confirm("轮换");
     await page.waitForSelector("text=Token 只显示这一次");
     await page.click("text=我已保存");
   });
@@ -76,13 +85,14 @@ try {
   await step("alert rule create / toggle / delete", async () => {
     await page.goto(`${base}/#/settings/alerts`);
     await page.click("text=添加规则");
-    await page.fill('dialog input[placeholder="CPU 过高"]', `${name}-rule`);
-    await page.click('dialog button[type="submit"]');
+    await dialog().locator('input[placeholder="CPU 过高"]').fill(`${name}-rule`);
+    await dialog().locator('button[type="submit"]').click();
     const rule = page.locator("[data-rule-row]", { hasText: `${name}-rule` });
-    await rule.getByRole("button", { name: "停用" }).click();
+    await rule.getByRole("switch").click();
     await rule.locator("text=已停用").waitFor();
     await rule.getByRole("button", { name: "删除" }).click();
-    await page.locator(`text=${name}-rule`).waitFor({ state: "detached" });
+    await confirm("删除");
+    await rule.waitFor({ state: "detached" });
   });
 
   await step("notification test (bodyless POST)", async () => {
@@ -96,6 +106,7 @@ try {
   await step("delete server (DELETE)", async () => {
     await page.goto(`${base}/#/settings/servers`);
     await row().locator("text=删除").click();
+    await confirm("删除");
     await row().waitFor({ state: "detached" });
   });
 

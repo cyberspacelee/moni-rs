@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
-import { useTheme } from "../lib/theme";
-import { Card } from "./ui";
+import { Card } from "@/components/ui/card";
+import { useTheme } from "@/lib/theme";
 
 export type ChartSeries = {
   label: string;
@@ -170,18 +170,18 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
   const overLeft = plot.current ? plot.current.over.offsetLeft : 0;
 
   return (
-    <Card className="p-4 sm:p-5">
+    <Card className="gap-0 p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
         <h3 className="flex h-5 items-center gap-2 text-sm leading-5 font-semibold whitespace-nowrap">
-          {icon && <span className="text-ink-3">{icon}</span>}
+          {icon && <span className="text-muted-foreground">{icon}</span>}
           {title}
         </h3>
         <div className="flex flex-wrap justify-end gap-x-4 gap-y-1">
           {series.map((s) => (
-            <span key={s.label} className="inline-flex h-5 items-center gap-1.5 text-xs leading-none text-ink-3">
+            <span key={s.label} className="inline-flex h-5 items-center gap-1.5 text-xs leading-none text-muted-foreground">
               <span aria-hidden className="h-0.5 w-3" style={{ background: `var(${s.color})` }} />
               {s.label}
-              <span className="tabular font-medium text-ink">{(() => {
+              <span className="tabular font-medium text-foreground">{(() => {
                 const v = last(s.values);
                 return v == null ? "–" : format(v);
               })()}</span>
@@ -194,14 +194,14 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
         {hover && tipX != null && (
           <div
             role="tooltip"
-            className="pointer-events-none absolute top-1 z-10 min-w-32 rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-[0_8px_24px_-8px_rgb(0_0_0/0.25)]"
+            className="pointer-events-none absolute top-1 z-10 min-w-32 rounded-md border border-border bg-card px-3 py-2 text-xs shadow-[0_8px_24px_-8px_rgb(0_0_0/0.25)]"
             style={
               flip
                 ? { right: `calc(100% - ${overLeft + hover.left - 12}px)` }
                 : { left: overLeft + hover.left + 12 }
             }
           >
-            <div className="tabular mb-1 text-ink-3">{tooltipTime(tipX)}</div>
+            <div className="tabular mb-1 text-muted-foreground">{tooltipTime(tipX)}</div>
             {series.map((s) => {
               const v = s.values[hover.idx];
               return (
@@ -210,7 +210,7 @@ export function Chart({ title, icon, xs, series, format, axisFormat, yMax, windo
                     <span aria-hidden className="h-0.5 w-2.5" style={{ background: `var(${s.color})` }} />
                     {s.label}
                   </span>
-                  <span className="tabular font-medium text-ink">{v == null ? "–" : format(v)}</span>
+                  <span className="tabular font-medium text-foreground">{v == null ? "–" : format(v)}</span>
                 </div>
               );
             })}

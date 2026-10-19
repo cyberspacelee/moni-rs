@@ -13,7 +13,7 @@ import type {
   PublicInfo,
   ServerStatus,
   TokenResponse,
-} from "../api/generated";
+} from "@/api/generated";
 
 export class ApiError extends Error {
   constructor(

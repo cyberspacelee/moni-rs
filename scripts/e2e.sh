@@ -31,7 +31,7 @@ node -e 'if (Number(process.versions.node.split(".")[0]) < 22 || !globalThis.Web
 # Serialize builds, then snapshot their outputs: concurrent runs must not overwrite live Wasm/assets.
 exec 9>"${TMPDIR:-/tmp}/moni-e2e-build-$(id -u).lock"
 flock 9
-npm --prefix web run build >"$test_dir/web-build.log" 2>&1 || {
+pnpm --filter moni-web build >"$test_dir/web-build.log" 2>&1 || {
   cat "$test_dir/web-build.log" >&2; exit 1;
 }
 cargo run -q -p moni-protocol --example patch-fixture >"$test_dir/patch.json"
@@ -221,7 +221,7 @@ async function rejectedDashboard(headers) {
 try {
   await startWorker();
   if (uiFlag === 'true') {
-    uiSmoke = spawn('npm', ['--prefix', 'web', 'run', 'test:smoke'], {
+    uiSmoke = spawn('pnpm', ['--filter', 'moni-web', 'test:smoke'], {
       cwd: repo, env: { ...process.env, MONI_BASE: base, MONI_PASSWORD: password },
       stdio: 'inherit',
     });

@@ -11,7 +11,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - ".github/workflows/deploy.yml"
 
 permissions:
@@ -78,23 +79,22 @@ jobs:
         if: steps.guard.outputs.skip != 'true' && steps.wb-cache.outputs.cache-hit != 'true'
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
 
+      - uses: pnpm/action-setup@v4
+        if: steps.guard.outputs.skip != 'true'
+
       - uses: actions/setup-node@v5
         if: steps.guard.outputs.skip != 'true'
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            web/package-lock.json
+          cache: pnpm
 
-      - name: Install wrangler
+      - name: Install dependencies
         if: steps.guard.outputs.skip != 'true'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build web
         if: steps.guard.outputs.skip != 'true'
-        working-directory: web
-        run: npm ci && npm run build
+        run: pnpm --filter moni-web build
 
       - name: Deploy
         if: steps.guard.outputs.skip != 'true'

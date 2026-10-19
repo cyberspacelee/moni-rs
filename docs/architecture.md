@@ -7,7 +7,7 @@
 - 监控个人 VPS（目标 ≤30 台，Free 计划内；≤100 台需调整历史粒度或升级 Paid）。
 - **完全运行在 Cloudflare 免费额度内**，无自建中心服务器。
 - **fork + 填 Secrets + 跑 workflow** 即可部署。
-- 后端与 Agent 均为 Rust；前端 React + TS。
+- 后端与 Agent 均为 Rust；前端 React + TS（shadcn/ui + Base UI）。
 
 ## 2. 组件总览
 

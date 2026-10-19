@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { Appearance, ThemeMode } from "../api/generated";
-import { DEFAULT_THEME, type ThemeDef, findTheme } from "./themes";
+import type { Appearance, ThemeMode } from "@/api/generated";
+import { DEFAULT_THEME, type ThemeDef, findTheme } from "@/lib/themes";
 
 /** The visitor's own choice in this browser; an absent field follows the site default. */
 export type ThemePref = { theme?: string; mode?: ThemeMode };
@@ -41,13 +41,6 @@ function write(key: string, value: unknown) {
 }
 
 function readPref(): ThemePref {
-  // Before themes this key held a bare "light" / "dark" string, which is not valid JSON.
-  try {
-    const legacy = localStorage.getItem(PREF_KEY);
-    if (legacy === "light" || legacy === "dark") return { mode: legacy };
-  } catch {
-    return {};
-  }
   const p = read<ThemePref>(PREF_KEY);
   return { theme: typeof p?.theme === "string" ? p.theme : undefined, mode: MODES.find((m) => m === p?.mode) };
 }

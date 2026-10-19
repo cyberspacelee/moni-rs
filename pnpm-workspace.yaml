@@ -1,0 +1,7 @@
+packages:
+  - web
+
+# pnpm 10 skips dependency install scripts unless listed; wrangler needs its native binaries.
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

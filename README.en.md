@@ -28,7 +28,7 @@ A VPS monitor written in Rust that runs entirely on the **Cloudflare free tier**
 | Agent memory | RSS about 4 MB, CPU ≈ 0% |
 | Agent binary | static musl build, about 3 MB (amd64 / arm64) |
 | Worker bundle | about 890 KiB of wasm (about 340 KiB gzipped); the free-plan limit is 3 MiB |
-| Front end | about 122 KB of JS and 9 KB of CSS (gzipped) |
+| Front end | landing page about 232 KB of JS and 20 KB of CSS (gzipped); detail and admin pages load on demand |
 | Sampling / reporting | samples every 1 s; live frames every 2 s (someone watching) or 30 s (nobody watching); one rollup per minute |
 | Retention | per-minute data for 7 days, per-hour data for 90 days |
 | Free-tier capacity | about **30 servers**, limited by SQLite rows written per day (about 3k per server per day); see [design §5.4](docs/design.md) |
@@ -100,12 +100,12 @@ To upgrade, rerun the install command with no arguments. Add `--auto-update` to 
 
 ## Local development
 
-You need Rust ≥ 1.94 with the `wasm32-unknown-unknown` target, `worker-build` 0.8.7, and Node 22+.
+You need Rust ≥ 1.94 with the `wasm32-unknown-unknown` target, `worker-build` 0.8.7, Node 22+ and pnpm 10.
 
 ```sh
-npm ci && cp crates/worker/.dev.vars.example crates/worker/.dev.vars
-(cd web && npm ci && npm run build)
-npm run dev                                   # http://127.0.0.1:8787
+pnpm install && cp crates/worker/.dev.vars.example crates/worker/.dev.vars
+pnpm build:web
+pnpm dev                                      # http://127.0.0.1:8787
 cargo run -p moni-agent -- --server ws://127.0.0.1:8787/ws/agent --token mn_xxx_yyy
 scripts/e2e.sh --quick --ui                   # end-to-end tests + browser smoke test
 ```

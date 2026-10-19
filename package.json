@@ -3,9 +3,11 @@
   "private": true,
   "scripts": {
     "dev": "cd crates/worker && wrangler dev",
-    "deploy": "cd crates/worker && wrangler deploy"
+    "deploy": "cd crates/worker && wrangler deploy",
+    "build:web": "pnpm --filter moni-web build"
   },
   "devDependencies": {
     "wrangler": "4.151.1"
-  }
+  },
+  "packageManager": "pnpm@10.33.2"
 }

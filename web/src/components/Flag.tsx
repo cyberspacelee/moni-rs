@@ -1,5 +1,5 @@
-import { IconGlobe } from "./icons";
-import { cx } from "./ui";
+import { EarthIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // SVG flags instead of emoji: Windows ships no flag glyphs and would show bare letters.
 const FLAGS = import.meta.glob<string>("/node_modules/flag-icons/flags/4x3/*.svg", {
@@ -25,8 +25,8 @@ export function Flag({ code, className }: { code: string | null | undefined; cla
   // An empty grey box reads as a broken image; a neutral globe says "region unknown".
   if (!url)
     return (
-      <span role="img" aria-label={label} title={label} className={cx("inline-grid h-[0.95em] w-[1.27em] shrink-0 place-items-center text-ink-3", className)}>
-        <IconGlobe className="size-[1em]" />
+      <span role="img" aria-label={label} title={label} className={cn("inline-grid h-[0.95em] w-[1.27em] shrink-0 place-items-center text-muted-foreground", className)}>
+        <EarthIcon aria-hidden className="size-[1em]" />
       </span>
     );
   return (
@@ -34,8 +34,8 @@ export function Flag({ code, className }: { code: string | null | undefined; cla
       role="img"
       aria-label={label}
       title={label}
-      className={cx(
-        "inline-block h-[0.95em] w-[1.27em] shrink-0 overflow-hidden rounded-[3px] bg-surface-2 bg-cover bg-center align-[-0.1em] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.12)]",
+      className={cn(
+        "inline-block h-[0.95em] w-[1.27em] shrink-0 overflow-hidden rounded-[3px] bg-muted bg-cover bg-center align-[-0.1em] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.12)]",
         className,
       )}
       style={{ backgroundImage: `url("${url}")` }}

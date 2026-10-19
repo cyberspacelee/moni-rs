@@ -1,10 +1,11 @@
 # AGENTS.md — moni-rs 开发约定（给 Codex 等编码代理）
 
 ## 项目
-运行在 Cloudflare 免费额度内的 Rust VPS 监控系统。必读：`docs/design.md`（设计）、`docs/api.md`（前后端契约，**以它为准**）、`docs/tasks.md`（任务与完成标准）、`docs/adr/`。
+运行在 Cloudflare 免费额度内的 Rust VPS 监控系统。必读：`docs/design.md`（设计）、`docs/api.md`（前后端契约，**以它为准**）、`docs/adr/`。
 
 ## 分工
 - 你只负责后端：`crates/**`、`scripts/**`、`.github/**`、`Cargo.toml`、`docs/`（仅限补充实现说明）。
+- 包管理器是 pnpm（workspace：根目录 + `web/`），不要生成 `package-lock.json`。
 - **不要修改 `web/`**，`web/src/api/generated/`（由 ts-rs 生成）和 `web/dist/.gitkeep` 除外。
 - 不要执行 `git commit` / `git push`，提交由维护者完成。
 
@@ -15,9 +16,11 @@ cargo test -p moni-protocol --features ts           # 生成 web/src/api/generat
 cargo clippy -p moni-protocol -p moni-agent -- -D warnings
 cargo clippy -p moni-worker --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all
+pnpm install && pnpm build:web                     # 构建前端（e2e 与本地运行需要 web/dist）
+scripts/e2e.sh --quick --ui                         # 端到端 + 浏览器冒烟测试
 (cd crates/worker && ../../node_modules/.bin/wrangler dev --ip 127.0.0.1 --port 8787)   # 本地运行；需要 crates/worker/.dev.vars
 ```
-`worker-build` 0.8.7 已安装在 `~/.cargo/bin`；wrangler 4.151.1 安装在根目录 `node_modules`。
+`worker-build` 0.8.7 已安装在 `~/.cargo/bin`；wrangler 4.151.1 由根目录 `pnpm install` 安装到 `node_modules`。
 
 ## 硬性规则
 1. **Hub DO 不得在实例字段中保存需要正确性的状态**。实例可能在任意两条消息之间被回收；连接级状态放 WS attachment（≤16 KiB），持久状态放 SQLite（见 design §5.1）。

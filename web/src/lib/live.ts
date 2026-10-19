@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { ActiveAlert, DashboardEvent, ServerStatus } from "../api/generated";
-import { api, UNAUTHORIZED_EVENT } from "./api";
+import type { ActiveAlert, DashboardEvent, ServerStatus } from "@/api/generated";
+import { api, UNAUTHORIZED_EVENT } from "@/lib/api";
 
 export type ConnState = "connecting" | "open" | "closed";
 

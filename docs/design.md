@@ -210,9 +210,12 @@ CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);       -- schema_version、last_h
 
 ## 7. 前端（web/）
 
-React 19 + TypeScript + Tailwind v4 + Vite，图表用 uPlot。构建产物放在 `web/dist`，作为 Worker 的 Static Assets，`run_worker_first: ["/api/*", "/ws/*"]`。
-页面包括：登录（仅管理需要）、总览（服务器卡片，公开可见）、服务器详情（实时数据 + 历史曲线 + 主机信息 + 本月流量）、设置（服务器管理 / 安装命令 / 告警规则 / 告警事件 / 通知测试）。
-状态：一条 dashboard WS 连接，断线后指数退避重连；重连时用 snapshot 覆盖本地状态。支持明暗主题，移动端自适应。
+React 19 + TypeScript + Tailwind v4 + Vite，pnpm workspace 管理依赖。组件来自 shadcn/ui（Base UI 底层，源码在 `web/src/components/ui/`），交互组件的动画由 Animate UI（motion）提供；图标用 lucide-react；图表用 uPlot（见 ADR-0007、ADR-0008）。构建产物放在 `web/dist`，作为 Worker 的 Static Assets，`run_worker_first: ["/api/*", "/ws/*"]`。
+页面包括：登录（仅管理需要）、总览（服务器卡片，公开可见）、服务器详情（实时数据 + 历史曲线 + 主机信息 + 本月流量）、设置（服务器管理 / 安装命令 / 告警规则 / 告警事件 / 通知测试 / 站点外观）。总览以外的页面和外观选择器都按需加载。
+状态：一条 dashboard WS 连接，断线后指数退避重连；重连时用 snapshot 覆盖本地状态。
+主题：`web/src/themes/<id>.css` 定义调色板与圆角、字体、卡片阴影；`index.css` 把 shadcn 的语义角色映射到调色板，组件不直接引用主题颜色。共 7 套主题，支持明暗模式。
+交互：表单对话框在 sm 及以上宽度显示为居中 Dialog，在手机上显示为可下滑关闭的 Drawer；不可撤销的操作用 AlertDialog 二次确认；没有表单承载的错误用 Toast 提示；图标按钮的提示用 Tooltip。
+代码分工：`components/ui/` 是 shadcn 生成并按主题调整过的基础组件；`components/common.tsx` 是在其上组合出的应用级组件（ResponsiveDialog、ConfirmAction、Segmented、UsageMeter、EmptyState 等）。
 
 ## 8. 部署
 

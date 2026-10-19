@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
-import type { AppConfig } from "./api/generated";
-import { Layout } from "./components/Layout";
-import { Spinner } from "./components/ui";
-import { api, UNAUTHORIZED_EVENT } from "./lib/api";
-import { connectLive, disconnectLive, nudgeLive } from "./lib/live";
-import { navigate, useRoute } from "./lib/router";
-import { Login } from "./pages/Login";
-import { Overview } from "./pages/Overview";
-import { ServerDetail } from "./pages/ServerDetail";
-import { Settings } from "./pages/Settings";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import type { AppConfig } from "@/api/generated";
+import { PageSpinner } from "@/components/common";
+import { Layout } from "@/components/Layout";
+import { api, UNAUTHORIZED_EVENT } from "@/lib/api";
+import { connectLive, disconnectLive, nudgeLive } from "@/lib/live";
+import { navigate, useRoute } from "@/lib/router";
+import { Overview } from "@/pages/Overview";
+
+// The public overview is the landing page; charts (uPlot), forms and admin screens load on demand.
+const Login = lazy(() => import("@/pages/Login").then((m) => ({ default: m.Login })));
+const ServerDetail = lazy(() => import("@/pages/ServerDetail").then((m) => ({ default: m.ServerDetail })));
+const Settings = lazy(() => import("@/pages/Settings").then((m) => ({ default: m.Settings })));
 
 function RedirectHome() {
   useEffect(() => navigate({ page: "overview" }), []);
@@ -55,24 +57,21 @@ export function App() {
     };
   }, [live, role]);
 
-  if (role === "checking")
-    return (
-      <div className="grid min-h-dvh place-items-center">
-        <Spinner className="size-5" />
-      </div>
-    );
+  if (role === "checking") return <PageSpinner />;
 
   const admin = role === "admin";
   const needsLogin = role === "locked" || (!admin && (route.page === "login" || route.page === "settings"));
   if (needsLogin)
     return (
-      <Login
-        canGoBack={role === "public"}
-        onSuccess={() => {
-          signedIn();
-          if (route.page === "login") navigate({ page: "settings", tab: "servers" });
-        }}
-      />
+      <Suspense fallback={<PageSpinner />}>
+        <Login
+          canGoBack={role === "public"}
+          onSuccess={() => {
+            signedIn();
+            if (route.page === "login") navigate({ page: "settings", tab: "servers" });
+          }}
+        />
+      </Suspense>
     );
   if (route.page === "login") return <RedirectHome />;
 
@@ -85,9 +84,11 @@ export function App() {
 
   return (
     <Layout route={route} admin={admin} onLogout={logout}>
-      {route.page === "overview" && <Overview admin={admin} />}
-      {route.page === "server" && <ServerDetail id={route.id} admin={admin} />}
-      {route.page === "settings" && <Settings tab={route.tab} config={config} />}
+      <Suspense fallback={<PageSpinner />}>
+        {route.page === "overview" && <Overview admin={admin} />}
+        {route.page === "server" && <ServerDetail id={route.id} admin={admin} />}
+        {route.page === "settings" && <Settings tab={route.tab} config={config} />}
+      </Suspense>
     </Layout>
   );
 }

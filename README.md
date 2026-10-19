@@ -28,7 +28,7 @@
 | Agent 内存 | RSS 约 4 MB，CPU ≈ 0% |
 | Agent 体积 | musl 静态二进制，约 3 MB（amd64 / arm64） |
 | Worker 包体积 | 约 890 KiB wasm（gzip 后约 340 KiB），免费计划上限为 3 MiB |
-| 前端体积 | JS 约 122 KB、CSS 约 9 KB（gzip） |
+| 前端体积 | 首页 JS 约 232 KB、CSS 约 20 KB（gzip）；详情与管理页按需加载 |
 | 采样 / 上报 | 1 秒采样；实时帧间隔 2 秒（有人查看）或 30 秒（无人查看）；每分钟 1 条聚合数据 |
 | 数据保留 | 分钟粒度 7 天，小时粒度 90 天 |
 | 免费额度容量 | 约 **30 台**服务器，瓶颈是 SQLite 每日写入行数（每台约 3k 行/天），详见 [design §5.4](docs/design.md) |
@@ -98,12 +98,12 @@
 
 ## 本地开发
 
-需要 Rust ≥ 1.94（含 `wasm32-unknown-unknown` target）、`worker-build` 0.8.7 和 Node 22+。
+需要 Rust ≥ 1.94（含 `wasm32-unknown-unknown` target）、`worker-build` 0.8.7、Node 22+ 和 pnpm 10。
 
 ```sh
-npm ci && cp crates/worker/.dev.vars.example crates/worker/.dev.vars
-(cd web && npm ci && npm run build)
-npm run dev                                   # http://127.0.0.1:8787
+pnpm install && cp crates/worker/.dev.vars.example crates/worker/.dev.vars
+pnpm build:web
+pnpm dev                                      # http://127.0.0.1:8787
 cargo run -p moni-agent -- --server ws://127.0.0.1:8787/ws/agent --token mn_xxx_yyy
 scripts/e2e.sh --quick --ui                   # 端到端测试 + 浏览器冒烟测试
 ```
