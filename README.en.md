@@ -108,6 +108,7 @@ pnpm build:web
 pnpm dev                                      # http://127.0.0.1:8787
 cargo run -p moni-agent -- --server ws://127.0.0.1:8787/ws/agent --token mn_xxx_yyy
 scripts/e2e.sh --quick --ui                   # end-to-end tests + browser smoke test
+pnpm --filter moni-web screenshots           # regenerate docs/screenshots from mock data
 ```
 
 ## FAQ

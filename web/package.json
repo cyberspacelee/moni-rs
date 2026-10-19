@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:smoke": "node tests/smoke.mjs"
+    "test:smoke": "node tests/smoke.mjs",
+    "screenshots": "node tests/screenshots.mjs"
   },
   "dependencies": {
     "@animate-ui/react": "^2.0.0",

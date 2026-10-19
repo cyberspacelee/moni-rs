@@ -106,6 +106,7 @@ pnpm build:web
 pnpm dev                                      # http://127.0.0.1:8787
 cargo run -p moni-agent -- --server ws://127.0.0.1:8787/ws/agent --token mn_xxx_yyy
 scripts/e2e.sh --quick --ui                   # 端到端测试 + 浏览器冒烟测试
+pnpm --filter moni-web screenshots           # 用模拟数据重新生成 docs/screenshots
 ```
 
 ## 常见问题
