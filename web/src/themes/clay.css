@@ -20,7 +20,6 @@
   --brand-ink: #9a4424;
   --on-brand: #ffffff;
 
-  /* Chart series are 6-digit hex: the area fill appends an alpha byte. */
   --series-1: #c96442;
   --series-2: #5b8fc4;
   --chart-grid: #ece9df;

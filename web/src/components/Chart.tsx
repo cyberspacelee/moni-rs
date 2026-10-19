@@ -46,13 +46,23 @@ const tooltipTime = (sec: number) => {
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+/**
+ * `color` at `alpha`. The canvas normalises any opaque CSS colour to `#rrggbb`, so this holds
+ * even when the CSS minifier has shortened a theme's `#33ff66` to `#3f6`.
+ */
+function withAlpha(ctx: CanvasRenderingContext2D, color: string, alpha: number): string {
+  ctx.fillStyle = color;
+  const hex = String(ctx.fillStyle);
+  return /^#[0-9a-f]{6}$/i.test(hex) ? hex + Math.round(alpha * 255).toString(16).padStart(2, "0") : hex;
+}
+
 /** Same hue as the line, fading to nothing: the area reads as a wash under the curve, never a block. */
 function areaFill(color: string, strength: number): uPlot.Series.Fill {
   return (u) => {
     const { top, height } = u.bbox;
     const g = u.ctx.createLinearGradient(0, top, 0, top + height);
-    g.addColorStop(0, color + Math.round(strength * 255).toString(16).padStart(2, "0"));
-    g.addColorStop(1, color + "00");
+    g.addColorStop(0, withAlpha(u.ctx, color, strength));
+    g.addColorStop(1, withAlpha(u.ctx, color, 0));
     return g;
   };
 }

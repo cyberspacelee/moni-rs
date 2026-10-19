@@ -197,7 +197,7 @@ export function ResponsiveDialog({
           <DrawerTitle>{title}</DrawerTitle>
           {description && <DrawerDescription>{description}</DrawerDescription>}
         </DrawerHeader>
-        <div className={cn("overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]", className)}>{children}</div>
+        <div className={cn("overflow-x-hidden overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]", className)}>{children}</div>
       </DrawerContent>
     </Drawer>
   );

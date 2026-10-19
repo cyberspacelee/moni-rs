@@ -1,4 +1,4 @@
-/* Cloudflare — engineering console: denser, small radii, orange only for action and selection. */
+/* Cloudflare — engineering console: small radii, flat panels, orange only for action and selection. */
 [data-theme="cloudflare"] {
   --bg: #f7f7f8;
   --surface: #ffffff;
@@ -53,12 +53,6 @@
   --status-critical: #f78383;
   --status-good-soft: #20392b;
   --status-critical-soft: #45292c;
-}
-/* Every size is in rem, so a smaller root is the whole density change; phones keep touch sizes. */
-@media (min-width: 640px) {
-  html[data-theme="cloudflare"] {
-    font-size: 15px;
-  }
 }
 [data-theme="cloudflare"] .site-header {
   border-bottom: 2px solid var(--brand);

@@ -1,4 +1,4 @@
-/* 终端 — dark only. Phosphor green on black, monospace, square dashed frames, segmented meters. */
+/* 终端 — dark only. Phosphor green on black, monospace, square dashed frames, segmented meters, violet second series. */
 [data-theme="terminal"] {
   --bg: #000000;
   --surface: #060b07;
@@ -14,7 +14,7 @@
   --brand-ink: #33ff66;
   --on-brand: #000000;
   --series-1: #33ff66;
-  --series-2: #98c9a4;
+  --series-2: #d7a0ff;
   --chart-grid: #183921;
   --chart-axis: #69b97c;
   --status-good: #33ff66;

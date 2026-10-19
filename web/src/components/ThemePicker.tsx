@@ -85,7 +85,7 @@ export function ThemePicker({ open, onOpenChange }: { open: boolean; onOpenChang
         {site.locked ? (
           <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-ink-2">管理员已锁定站点主题（{siteName}），你仍可切换明暗。</p>
         ) : (
-          <div className="max-h-[50dvh] overflow-y-auto sm:max-h-none">
+          <div className="-m-1 max-h-[50dvh] overflow-x-hidden overflow-y-auto p-1 sm:max-h-none sm:overflow-visible">
             <ThemeList
               value={pref.theme ?? ""}
               dark={dark}
